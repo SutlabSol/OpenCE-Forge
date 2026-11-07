@@ -91,10 +91,10 @@ jobs:
           tag="build-128"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" release/* --clobber
-            gh release edit "$tag" --title "v0.8.2 - Content Evolved (build-128 Linux)" \
-              --notes "v0.8.2: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-128 (0222e72). Includes Enemy Loadout settings, 250% Swarm / 300% Legion Firefight waves, vehicle wreck cleanup, dropship targeting fixes, friendly bot kill stat fixes, pre-every-game map + variant voting, and 256-entry server rotation support."
+            gh release edit "$tag" --title "v0.8.3 - Content Evolved (build-128 Linux)" \
+              --notes "v0.8.3: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-128 (0222e72). Includes persistent 0-player Forge dedicated server support (:forge), automatic custom_maps/<map>.map overwrite + map CRC refresh on edit/close, Enemy Loadout settings, 250% Swarm / 300% Legion Firefight waves, vehicle wreck cleanup, dropship targeting fixes, friendly bot kill stat fixes, pre-every-game map + variant voting, and 256-entry server rotation support."
           else
             gh release create "$tag" release/* --target "$GITHUB_SHA" --latest \
-              --title "v0.8.2 - Content Evolved (build-128 Linux)" \
-              --notes "v0.8.2: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-128 (0222e72). Includes Enemy Loadout settings, 250% Swarm / 300% Legion Firefight waves, vehicle wreck cleanup, dropship targeting fixes, friendly bot kill stat fixes, pre-every-game map + variant voting, and 256-entry server rotation support."
+              --title "v0.8.3 - Content Evolved (build-128 Linux)" \
+              --notes "v0.8.3: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-128 (0222e72). Includes persistent 0-player Forge dedicated server support (:forge), automatic custom_maps/<map>.map overwrite + map CRC refresh on edit/close, Enemy Loadout settings, 250% Swarm / 300% Legion Firefight waves, vehicle wreck cleanup, dropship targeting fixes, friendly bot kill stat fixes, pre-every-game map + variant voting, and 256-entry server rotation support."
           fi

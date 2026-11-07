@@ -16,7 +16,7 @@ extern "C" {
 
 /* ---------- Forge Release Version & Network Protocol Isolation (v2.4.1) */
 
-#define FORGE_VERSION_STRING "2.4.2"
+#define FORGE_VERSION_STRING "2.4.3"
 /* (this fork's own: Content Extended's Forge is 0x4628, and the two do not
 play together. The browser lists one number alone: forge_get_network_version) */
 #define FORGE_NETWORK_VERSION 0x4777
@@ -33,6 +33,10 @@ char *main_get_map_name(void);
 char const *forge_get_active_map_name(void);
 void *forge_host_fopen(char const *path, char const *mode);
 int forge_host_remove(char const *path);
+int forge_host_rename(char const *old_path, char const *new_path);
+void forge_server_mark_dirty(void);
+void forge_server_autosave_tick(void);
+int forge_server_save_map_if_dirty(int force_full_export);
 /* Forge's own files and folders (Faber_data: beside the game on Windows,
 under the data root on the other builds) through the Win32 calls the port's
 file layer has on every build (port/linux/src/xbox_files.c): its

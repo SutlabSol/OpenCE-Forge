@@ -87,7 +87,7 @@ static struct
 static char const *const server_opence_gametypes[] =
 {
 	"swat", "infection", "gun_game", "hardcore", "hardcore_ctf", "hardcore_oddball", "hardcore_king",
-	"floodfection", "tag_gun_game", "firefight",
+	"floodfection", "tag_gun_game", "firefight", "forge",
 };
 
 char const *server_gametype_builtin_name(
@@ -142,6 +142,21 @@ static boolean server_gametype_base(
 			}
 			return TRUE;
 		}
+	}
+	if (!strcmp(name, "forge"))
+	{
+		*variant = *build_game_variant_slayer(&temporary);
+		ustrncpy(variant->human_readable_game_description, L"Forge",
+			NUMBEROF(variant->human_readable_game_description) - 1);
+		variant->universal_variant.teams = FALSE;
+		variant->universal_variant.score_to_win = 0x3FFFFFFF;
+		variant->universal_variant.respawn_time = 90;
+		variant->universal_variant.suicide_penalty = 0;
+		game_variant_options_default(variant, options);
+		options->time_limit = 0;
+		options->vehicle_set[0] = VARIANT_VEHICLE_SET_PC;
+		options->vehicle_set[1] = VARIANT_VEHICLE_SET_PC;
+		return TRUE;
 	}
 	if (!strcmp(name, "firefight") ||
 		!strcmp(name, "generator_defense") ||

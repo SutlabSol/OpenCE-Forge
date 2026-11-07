@@ -5197,6 +5197,40 @@ long network_game_server_port_remote_machine_count(
 	return count;
 }
 
+void network_game_server_port_refresh_map_version(void)
+{
+	struct network_game_server *server = global_network_game_server_get();
+
+	if (!server || !server->game.map.name[0])
+		return;
+	custom_edition_maps_look_again();
+	server->game.map.version = custom_edition_maps_crc(server->game.map.name);
+	if (server->state != _network_game_server_state_closed)
+	{
+		network_game_server_flag_update(server, FLAG(_network_game_server_map_version_updated_bit));
+		network_game_server_update_client_machines(server);
+		network_game_server_advertise_game(server);
+	}
+}
+
+boolean network_game_server_port_start_immediately_if_precached(
+	struct network_game_server *server)
+{
+	if (!server || server->state != _network_game_server_state_pregame ||
+		TEST_FLAG(server->flags, _network_game_server_start_game_bit))
+	{
+		return FALSE;
+	}
+	if (!main_map_WaitUntilDonePrecaching())
+		return FALSE;
+	server->countdown_paused = FALSE;
+	server->countdown_timer = 0;
+	if (!network_game_server_start_game(server))
+		return FALSE;
+	SET_FLAG(server->flags, _network_game_server_start_game_bit, TRUE);
+	return TRUE;
+}
+
 /* port: a gametype's PC options: the menus' (player_ui_set_game_variant_options)
 when it is the menus' gametype, else its defaults */
 static void network_game_server_variant_options(

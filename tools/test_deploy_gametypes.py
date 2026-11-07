@@ -27,6 +27,7 @@ OPENCE_ENGINES = {
     # (Content Extended's Firefight: an engine of its own, with no table of
     # rules in gametype files, server_toml.c's engine_tables)
     "firefight": None,
+    "forge": "slayer",
 }
 
 

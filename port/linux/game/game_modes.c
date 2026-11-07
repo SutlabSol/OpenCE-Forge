@@ -338,10 +338,17 @@ short game_modes_variant_mode_variant(
 	return _game_mode_variant_none;
 }
 
+#define GAME_MODES_KIND_FORGE 0x46
+
 byte game_modes_kind(
 	struct game_variant const *variant,
 	struct game_variant_options const *options)
 {
+	if (variant && variant->game_engine_index == game_engine_slayer &&
+		variant->universal_variant.score_to_win == 0x3FFFFFFF)
+	{
+		return GAME_MODES_KIND_FORGE;
+	}
 	return (byte)(game_modes_variant_mode(variant, options) |
 		(options && options->hardcore ? GAME_MODES_KIND_HARDCORE : 0));
 }
@@ -371,6 +378,8 @@ wchar_t const *game_modes_kind_name(
 	boolean hardcore = (kind & GAME_MODES_KIND_HARDCORE) != 0;
 	short mode = (short)(kind & ~GAME_MODES_KIND_HARDCORE);
 
+	if (mode == GAME_MODES_KIND_FORGE)
+		return L"FORGE";
 	/* (another machine's: a mode of Slayer only, and one this build knows) */
 	if (game_engine_index == game_engine_slayer && mode > _game_mode_none && mode < NUMBER_OF_GAME_MODES)
 		return mode_names[mode][hardcore][abbreviated != FALSE];

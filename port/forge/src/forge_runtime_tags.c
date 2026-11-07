@@ -159,6 +159,62 @@ int forge_host_remove(char const *path)
 	return remove(norm);
 }
 
+static void forge_resolve_host_path(char const *path, char *out_path, size_t out_sz)
+{
+	char norm[512];
+	char d_xbox[512];
+	size_t i = 0;
+
+	if (!path || !path[0] || !out_path || out_sz == 0)
+	{
+		if (out_path && out_sz > 0)
+			out_path[0] = 0;
+		return;
+	}
+
+	while (path[i] && i + 1 < sizeof(norm))
+	{
+		norm[i] = (path[i] == '\\') ? '/' : path[i];
+		i++;
+	}
+	norm[i] = '\0';
+
+	if ((norm[0] == 'd' || norm[0] == 'D' ||
+		 norm[0] == 't' || norm[0] == 'T' ||
+		 norm[0] == 'u' || norm[0] == 'U') &&
+		norm[1] == ':' && norm[2] == '/')
+	{
+		platform_translate_path(path, out_path, out_sz);
+		return;
+	}
+
+	if (norm[0] == '/' ||
+		(((norm[0] >= 'A' && norm[0] <= 'Z') || (norm[0] >= 'a' && norm[0] <= 'z')) && norm[1] == ':'))
+	{
+		snprintf(out_path, out_sz, "%s", norm);
+		return;
+	}
+
+	snprintf(d_xbox, sizeof(d_xbox), "d:\\%s", norm);
+	platform_translate_path(d_xbox, out_path, out_sz);
+}
+
+int forge_host_rename(char const *old_path, char const *new_path)
+{
+	char host_old[512];
+	char host_new[512];
+
+	if (!old_path || !old_path[0] || !new_path || !new_path[0])
+		return -1;
+	forge_resolve_host_path(old_path, host_old, sizeof(host_old));
+	forge_resolve_host_path(new_path, host_new, sizeof(host_new));
+	remove(host_new);
+	if (rename(host_old, host_new) == 0)
+		return 0;
+	remove(new_path);
+	return rename(old_path, new_path);
+}
+
 char const *forge_get_active_map_name(void)
 {
 	static char s_active_map[256];
@@ -5352,12 +5408,17 @@ static void resolve_current_base_map_path(char *out_path, size_t out_sz)
 	snprintf(out_path, out_sz, "maps/bloodgulch.map");
 }
 
+static int s_forge_server_dirty_txt = 0;
+static int s_forge_server_dirty_map = 0;
+
 int forge_ui_save_copy_as(char const *new_map_name)
 {
 	char base_map_path[512];
 	char clean_name[64];
 	int was_already_saved = g_forge.has_saved_map_once;
 	int ok;
+	extern boolean halo_server_mode(void);
+	extern void network_game_server_port_refresh_map_version(void);
 
 	if (!new_map_name || !new_map_name[0])
 	{
@@ -5366,7 +5427,11 @@ int forge_ui_save_copy_as(char const *new_map_name)
 		char const *slash2 = cur ? strrchr(cur, '/') : NULL;
 		if (slash2 && (!slash || slash2 > slash))
 			slash = slash2;
-		snprintf(clean_name, sizeof(clean_name), "%s_forge", slash ? (slash + 1) : ((cur && cur[0]) ? cur : "bloodgulch"));
+		snprintf(
+			clean_name,
+			sizeof(clean_name),
+			halo_server_mode() ? "%s" : "%s_forge",
+			slash ? (slash + 1) : ((cur && cur[0]) ? cur : "bloodgulch"));
 	}
 	else
 	{
@@ -5389,9 +5454,12 @@ int forge_ui_save_copy_as(char const *new_map_name)
 	if (ok)
 	{
 		extern void custom_edition_maps_look_again(void);
+		s_forge_server_dirty_txt = 0;
+		s_forge_server_dirty_map = 0;
 		platform_log("Forge: saved %s with %d campaign tags for its AI, %d AI spawns", clean_name,
 			(int)g_forge.edit_state.ai_actor_count, (int)g_forge.edit_state.ai_spawn_count);
 		custom_edition_maps_look_again();
+		network_game_server_port_refresh_map_version();
 		snprintf(g_forge.save_map_name, sizeof(g_forge.save_map_name), "%s", clean_name);
 		g_forge.save_map_name_len = (int)strlen(g_forge.save_map_name);
 		g_forge.has_saved_map_once = 1;
@@ -5416,6 +5484,12 @@ int forge_ui_save_copy_as(char const *new_map_name)
 
 void forge_trigger_save_map_action(void)
 {
+	extern void forge_send_packet_to_host(char const *text);
+
+	if (game_connection() == _game_connection_network_client)
+	{
+		forge_send_packet_to_host("!FW");
+	}
 	/* If an initial save has already been done in this session (or loaded from Edit Maps), quick-update immediately! */
 	if (g_forge.has_saved_map_once && g_forge.save_map_name[0])
 	{
@@ -6555,6 +6629,42 @@ void forge_load_saved_map_state_if_present(char const *map_name)
 		slash = strrchr(map_name, '/');
 	snprintf(leaf, sizeof(leaf), "%s", slash ? (slash + 1) : map_name);
 
+	{
+		extern boolean halo_server_mode(void);
+		if (halo_server_mode())
+		{
+			forge_runtime_init();
+			snprintf(g_forge.save_map_name, sizeof(g_forge.save_map_name), "%s", leaf);
+			g_forge.save_map_name_len = (int)strlen(g_forge.save_map_name);
+			g_forge.has_saved_map_once = 1;
+		}
+	}
+
+	/* 0. If a crash-recovery sidecar custom_maps/<leaf>.txt exists (written by dedicated server autosave), load it first */
+	snprintf(txt_path, sizeof(txt_path), "custom_maps/%s.txt", leaf);
+	f = fopen(txt_path, "rb");
+	if (f)
+	{
+		long sz;
+		fseek(f, 0, SEEK_END);
+		sz = ftell(f);
+		fseek(f, 0, SEEK_SET);
+		if (sz > 0 && sz < 4 * 1024 * 1024)
+		{
+			char *buf = (char *)malloc((size_t)sz + 1u);
+			if (buf)
+			{
+				size_t rd = fread(buf, 1, (size_t)sz, f);
+				buf[rd] = 0;
+				parse_forge_state_text_buffer(buf, leaf);
+				free(buf);
+				fclose(f);
+				return;
+			}
+		}
+		fclose(f);
+	}
+
 	/* 1. Read embedded [OpenCE Forge Map] / [ForgeState] directly from .map header (0x1E4 / 0x1E8) */
 	snprintf(map_path, sizeof(map_path), "custom_maps/%s.map", leaf);
 	f = fopen(map_path, "rb");
@@ -6649,6 +6759,170 @@ void forge_load_saved_map_state_if_present(char const *map_name)
 			}
 		}
 		fclose(f);
+	}
+}
+
+extern unsigned long system_milliseconds(void);
+extern boolean halo_server_mode(void);
+
+static unsigned long s_forge_server_last_edit_ms = 0;
+static unsigned long s_forge_server_last_txt_save_ms = 0;
+static unsigned long s_forge_server_last_map_save_ms = 0;
+
+static int forge_write_sidecar_state_file(char const *leaf)
+{
+	char txt_path[512];
+	char tmp_path[512];
+	FILE *f;
+	uint32_t i;
+
+	if (!leaf || !leaf[0])
+		return 0;
+
+#if FORGE_HOST_FILES
+	CreateDirectoryA("d:\\custom_maps", NULL);
+	CreateDirectoryA("custom_maps", NULL);
+#endif
+
+	snprintf(txt_path, sizeof(txt_path), "custom_maps/%s.txt", leaf);
+	snprintf(tmp_path, sizeof(tmp_path), "custom_maps/%s.txt.tmp", leaf);
+	f = fopen(tmp_path, "wb");
+	if (!f)
+		return 0;
+
+	fprintf(f, "[OpenCE Forge Map]\n");
+	fprintf(f, "version = 2\n");
+	fprintf(f, "output_map = %s\n", leaf);
+	fprintf(f, "placed_count = %u\n", (unsigned)g_forge.edit_state.placed_object_count);
+	fprintf(f, "default_edit_count = %u\n\n", (unsigned)g_forge.edit_state.default_edit_count);
+	fprintf(f, "[ForgeState]\n");
+
+	for (i = 0; i < g_forge.edit_state.placed_object_count; i++)
+	{
+		struct forge_placed_object const *po = &g_forge.edit_state.placed_objects[i];
+		fprintf(
+			f,
+			"placed = %08X|%d|%s|%.4f|%.4f|%.4f|%.2f|%.2f|%.2f|%d|%u\n",
+			(unsigned)po->group_tag,
+			(int)po->source_cache_id,
+			po->tag_path,
+			po->x,
+			po->y,
+			po->z,
+			po->yaw,
+			po->pitch,
+			po->roll,
+			(int)po->team_index,
+			(unsigned)po->flags);
+	}
+	for (i = 0; i < g_forge.edit_state.default_edit_count; i++)
+	{
+		struct forge_default_placement_edit const *de = &g_forge.edit_state.default_edits[i];
+		fprintf(
+			f,
+			"default_edit = %u|%u|%u|%.4f|%.4f|%.4f|%.2f|%.2f|%.2f|%d\n",
+			(unsigned)de->chunk_type,
+			(unsigned)de->chunk_index,
+			(unsigned)de->deleted,
+			de->x,
+			de->y,
+			de->z,
+			de->yaw,
+			de->pitch,
+			de->roll,
+			(int)de->team_index);
+	}
+	for (i = 0; i < g_forge.edit_state.ai_spawn_count; i++)
+	{
+		struct forge_ai_spawn_def const *s = &g_forge.edit_state.ai_spawns[i];
+		char line[384];
+
+		if (forge_ai_state_line_format(s, line, sizeof(line)))
+			fprintf(f, "%s\n", line);
+	}
+	fclose(f);
+	forge_host_rename(tmp_path, txt_path);
+	return 1;
+}
+
+void forge_server_mark_dirty(void)
+{
+	unsigned long now = system_milliseconds();
+	s_forge_server_dirty_txt = 1;
+	s_forge_server_dirty_map = 1;
+	s_forge_server_last_edit_ms = now ? now : 1UL;
+}
+
+int forge_server_save_map_if_dirty(int force_full_export)
+{
+	char const *cur;
+	char const *slash;
+	char const *slash2;
+	char leaf[64];
+
+	if (!g_forge_session_enabled)
+		return 0;
+	if (!s_forge_server_dirty_txt && !s_forge_server_dirty_map && !force_full_export)
+		return 0;
+
+	if (g_forge.save_map_name[0])
+	{
+		snprintf(leaf, sizeof(leaf), "%s", g_forge.save_map_name);
+	}
+	else
+	{
+		cur = forge_get_active_map_name();
+		if (!cur || !cur[0])
+			return 0;
+		slash = strrchr(cur, '\\');
+		slash2 = strrchr(cur, '/');
+		if (slash2 && (!slash || slash2 > slash))
+			slash = slash2;
+		snprintf(leaf, sizeof(leaf), "%s", slash ? (slash + 1) : cur);
+	}
+	if (!leaf[0] || _stricmp(leaf, "ui") == 0)
+		return 0;
+
+	if (force_full_export)
+	{
+		if (!s_forge_server_dirty_map && !s_forge_server_dirty_txt)
+			return 0;
+		s_forge_server_dirty_txt = 0;
+		s_forge_server_dirty_map = 0;
+		s_forge_server_last_map_save_ms = system_milliseconds();
+		return forge_ui_save_copy_as(leaf);
+	}
+
+	if (s_forge_server_dirty_txt)
+	{
+		forge_write_sidecar_state_file(leaf);
+		s_forge_server_dirty_txt = 0;
+		s_forge_server_last_txt_save_ms = system_milliseconds();
+	}
+	return 1;
+}
+
+void forge_server_autosave_tick(void)
+{
+	unsigned long now;
+
+	if (!g_forge_session_enabled || !halo_server_mode())
+		return;
+	if (!s_forge_server_dirty_txt && !s_forge_server_dirty_map)
+		return;
+
+	now = system_milliseconds();
+	if (s_forge_server_dirty_txt &&
+		(now - s_forge_server_last_edit_ms) >= 1500UL &&
+		(now - s_forge_server_last_txt_save_ms) >= 1500UL)
+	{
+		forge_server_save_map_if_dirty(0);
+	}
+	if (s_forge_server_dirty_map &&
+		(now - s_forge_server_last_edit_ms) >= 8000UL &&
+		(now - s_forge_server_last_map_save_ms) >= 10000UL)
+	{
+		forge_server_save_map_if_dirty(1);
 	}
 }
 

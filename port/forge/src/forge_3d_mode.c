@@ -6088,6 +6088,14 @@ void forge_3d_update(float dt)
 		{
 			ready = 1;
 		}
+		else if (halo_server_mode())
+		{
+			spawn_pos.x = 0.0f;
+			spawn_pos.y = 0.0f;
+			spawn_pos.z = 0.0f;
+			spawn_yaw = 0.0f;
+			ready = 1;
+		}
 
 		if (ready)
 		{

@@ -188,7 +188,7 @@ struct forge_catalog_entry const *forge_find_catalog_entry_by_hash(uint32_t hash
 	return NULL;
 }
 
-static void forge_send_packet_to_host(char const *text)
+void forge_send_packet_to_host(char const *text)
 {
 	struct forge_chat_packet pkt;
 	if (!text || !text[0])
@@ -542,6 +542,7 @@ void forge_network_sync_tick(void)
 			if (g_host_machine_sync_cursor[m] >= g_forge.live_instance_count)
 				g_host_machine_sync_cursor[m] = -1;
 		}
+		forge_server_autosave_tick();
 	}
 }
 
@@ -1338,9 +1339,15 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 		return 1;
 	}
 
-	/* 3. Client -> Host Packets (!FS:, !FM:, !FD:, !FU:) */
+	/* 3. Client -> Host Packets (!FS:, !FM:, !FD:, !FU:, !FW) */
 	if (is_from_client_to_host && game_connection() == _game_connection_network_server)
 	{
+		if (strncmp(text, "!FW", 3) == 0)
+		{
+			forge_server_mark_dirty();
+			forge_server_save_map_if_dirty(1);
+			return 1;
+		}
 		if (strncmp(text, "!FA:", 4) == 0)
 		{
 			int32_t target_idx = -1;
@@ -1351,6 +1358,7 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 
 				if (forge_ai_spawn_packet(target_idx, relay, sizeof(relay)))
 					forge_broadcast_packet_to_clients(relay, machine_index);
+				forge_server_mark_dirty();
 			}
 			return 1;
 		}
@@ -1366,6 +1374,7 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 					forge_3d_marker_usage_apply(target_idx, (int16_t)usage);
 					snprintf(relay, sizeof(relay), "!FU:%d:%d", (int)target_idx, usage);
 					forge_broadcast_packet_to_clients(relay, machine_index);
+					forge_server_mark_dirty();
 				}
 			}
 			return 1;
@@ -1391,6 +1400,7 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 						(float)roll_cr / 100.0f,
 						(int16_t)team,
 						1);
+					forge_server_mark_dirty();
 				}
 			}
 			return 1;
@@ -1435,6 +1445,7 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 						roll_cr,
 						(n >= 9 && is_held) ? 1 : 0);
 					forge_broadcast_packet_to_clients(relay, machine_index);
+					forge_server_mark_dirty();
 				}
 			}
 			return 1;
@@ -1472,6 +1483,7 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 					forge_3d_delete_instance(target_idx, 0);
 					snprintf(relay, sizeof(relay), "!FD:%d:%d", (int)target_idx, host_obj_abs);
 					forge_broadcast_packet_to_clients(relay, machine_index);
+					forge_server_mark_dirty();
 				}
 			}
 			return 1;

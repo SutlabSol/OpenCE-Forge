@@ -557,6 +557,13 @@ static boolean server_apply_entry(
 
 	if (!network_server)
 		return FALSE;
+	{
+		extern int g_forge_session_enabled;
+		extern void forge_runtime_init(void);
+		g_forge_session_enabled = (!strcmp(entry->gametype, "forge")) ? 1 : 0;
+		if (g_forge_session_enabled)
+			forge_runtime_init();
+	}
 	csmemset(&variant, 0, sizeof(variant));
 	if (!strcmp(entry->gametype, "coop"))
 	{
@@ -652,6 +659,12 @@ static boolean server_cooperative(
 	return server.current_set && !strcmp(server.current.gametype, "coop");
 }
 
+static boolean server_forge(
+	void)
+{
+	return server.current_set && !strcmp(server.current.gametype, "forge");
+}
+
 /* the game over, said: how it ended, the scores' seconds, and the next game
 on every machine */
 static void server_game_over(
@@ -660,6 +673,10 @@ static void server_game_over(
 	struct server_json json;
 	long postgame_seconds = server.skip_postgame ? 0 : PIN(config_integer("server.postgame_seconds"), 0, 300);
 
+	{
+		extern int forge_server_save_map_if_dirty(int force_full_export);
+		forge_server_save_map_if_dirty(1);
+	}
 	server.game_over_said = TRUE;
 	server_log(_server_log_info, "game", "ended (%s) after %ld s", server_end_names[server.end_reason],
 		(long)server.game_seconds);
@@ -715,6 +732,10 @@ boolean server_director_end_game(
 	}
 	if (!server.end_asked)
 	{
+		{
+			extern int forge_server_save_map_if_dirty(int force_full_export);
+			forge_server_save_map_if_dirty(1);
+		}
 		server.end_asked = TRUE;
 		server.end_reason = reason;
 		server.skip_postgame = skip_postgame;
@@ -996,6 +1017,10 @@ void server_director_quit(
 
 	if (server.quitting)
 		return;
+	{
+		extern int forge_server_save_map_if_dirty(int force_full_export);
+		forge_server_save_map_if_dirty(1);
+	}
 	server.quitting = TRUE;
 	server.exit_code = exit_code;
 	server_set_state(_server_state_stopping);
@@ -1591,6 +1616,13 @@ static void server_hosting(
 	server.menu_seconds += seconds;
 	if (server.menu_seconds < MENU_SETTLE_SECONDS)
 		return;
+	if (server.rotation.count > 0 && !strcmp(server.rotation.entries[0].gametype, "forge"))
+	{
+		extern int g_forge_session_enabled;
+		extern void forge_runtime_init(void);
+		g_forge_session_enabled = 1;
+		forge_runtime_init();
+	}
 	server_apply_game_settings();
 	player_ui_fast_setup_network_server();
 	if (!global_network_game_server_get() || !global_network_game_client_get())
@@ -1845,8 +1877,13 @@ static void server_lobby(
 		}
 	}
 	/* the countdown: held below the players wanted, started with them in */
+	if (server_forge() && !network_game_server_port_start_sent(network_server))
+	{
+		extern boolean network_game_server_port_start_immediately_if_precached(struct network_game_server *server);
+		network_game_server_port_start_immediately_if_precached(network_server);
+	}
 	countdown = network_game_server_port_countdown_milliseconds(network_server);
-	if (players < minimum)
+	if (!server_forge() && players < minimum)
 	{
 		if (!network_game_server_port_countdown_paused(network_server))
 		{
@@ -1928,7 +1965,7 @@ static void server_playing(
 	server.game_seconds += seconds;
 	/* nobody in it (and nobody joining): it ends */
 	players = server_players_in_game();
-	if (players == 0 && network_game_server_port_remote_machine_count(global_network_game_server_get(), FALSE) == 0)
+	if (!server_forge() && players == 0 && network_game_server_port_remote_machine_count(global_network_game_server_get(), FALSE) == 0)
 	{
 		server.empty_seconds += seconds;
 		if (config_integer("server.empty_seconds") > 0 && server.empty_seconds >= (real)config_integer("server.empty_seconds"))
@@ -1939,6 +1976,7 @@ static void server_playing(
 		server.empty_seconds = 0.0f;
 	}
 	/* no score for so long: it ends */
+	if (!server_forge())
 	{
 		long red, blue, sum = 0;
 		struct data_iterator iterator;
