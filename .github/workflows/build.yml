@@ -91,8 +91,10 @@ jobs:
           tag="build-127"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" release/* --clobber
+            gh release edit "$tag" --title "v0.8.1 - Content Evolved (build-127 Linux)" \
+              --notes "v0.8.1: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-127 (981b84c). Includes pre-every-game map + variant voting and expanded 256-entry server rotation support."
           else
             gh release create "$tag" release/* --target "$GITHUB_SHA" --latest \
-              --title "Update 0.8 - Content Evolved (build-127 Linux)" \
-              --notes "Linux dedicated server and client release built from Watanoge/halo-content-evolved build-127 (981b84c)."
+              --title "v0.8.1 - Content Evolved (build-127 Linux)" \
+              --notes "v0.8.1: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-127 (981b84c). Includes pre-every-game map + variant voting and expanded 256-entry server rotation support."
           fi

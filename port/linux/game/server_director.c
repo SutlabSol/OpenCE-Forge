@@ -224,6 +224,7 @@ static struct
 	/* this lobby's map vote: over (or not held), and the rotation's entries
 	it offers (server.map_vote) */
 	boolean map_vote_done;
+	boolean map_vote_ran;
 	short map_vote_count;
 	long map_vote_entries[NETWORK_MAP_VOTE_MAXIMUM_CHOICES];
 } server;
@@ -1602,6 +1603,8 @@ static void server_hosting(
 	server_apply_game_settings();
 	server_apply_listing();
 	server.entry_applied = FALSE;
+	server.map_vote_done = FALSE;
+	server.map_vote_ran = FALSE;
 	server.lobby_seconds = 0.0f;
 	server.back_to_lobby = FALSE;
 	server_set_state(_server_state_lobby);
@@ -1657,7 +1660,7 @@ static boolean server_map_vote(
 		struct server_json json;
 
 		server.map_vote_done = TRUE;
-		if (!config_boolean("server.map_vote") || server.has_interposed || !server.games_hosted ||
+		if (!config_boolean("server.map_vote") || server.has_interposed ||
 			server_player_count() == 0)
 		{
 			return FALSE;
@@ -1688,7 +1691,10 @@ static boolean server_map_vote(
 			}
 		}
 		if (candidate_count < 2)
+		{
+			server.map_vote_ran = TRUE;
 			return FALSE;
+		}
 		/* (shuffled: the first wanted) */
 		for (index = candidate_count - 1; index > 0; index--)
 		{
@@ -1732,12 +1738,14 @@ static boolean server_map_vote(
 	{
 		network_map_vote_cancel();
 		server.map_vote_done = TRUE;
+		server.map_vote_ran = FALSE;
 		return FALSE;
 	}
 	winner = network_map_vote_host_update();
 	if (winner == NONE)
 		return TRUE;
 	server.map_vote_done = TRUE;
+	server.map_vote_ran = TRUE;
 	index = server.map_vote_entries[winner];
 	if (index < 0 || index >= server.rotation.count || server.rotation.entries[index].rejected[0])
 		return FALSE;
@@ -1856,6 +1864,12 @@ static void server_lobby(
 		once) */
 		if (network_game_server_port_ok_to_countdown(network_server))
 		{
+			if (config_boolean("server.map_vote") && !server.has_interposed && !server.map_vote_ran)
+			{
+				server.map_vote_done = FALSE;
+				server.entry_applied = FALSE;
+				return;
+			}
 			/* (a team game, and one player waits: the next entry for him, if
 			the rotation has one he can play: server.team_start skip) */
 			if (skip_teams && players == 1 && !server.current_is_interposed && server_entry_teams(&server.current) &&
@@ -2006,6 +2020,7 @@ static void server_back_in_lobby(
 	server_advance();
 	server.entry_applied = FALSE;
 	server.map_vote_done = FALSE;
+	server.map_vote_ran = FALSE;
 	server.lobby_seconds = 0.0f;
 	server.end_asked = FALSE;
 	server.skip_postgame = FALSE;
