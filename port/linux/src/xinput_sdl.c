@@ -523,7 +523,7 @@ their own: pad_gyro, by the host's SDL (host_sdl_gamepad_gyro) or this
 build's own (Windows and the web: sdl_gamepad_gyro_turn). */
 /* (the builds whose SDL is their own, not a host's: their gamepads'
 sensors read here) */
-#if defined(HALO_WINDOWS) || defined(HALO_WEB)
+#if !defined(HALO_ANDROID)
 #define HALO_NATIVE_SDL_GYRO
 #endif
 /* input.gyro_aim and the rest, each local player's (its profile's own:
