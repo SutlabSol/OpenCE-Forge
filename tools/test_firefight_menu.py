@@ -274,3 +274,82 @@ def test_forge_shows_the_generator_a_match_will_have():
     assert "obj_def_idx = generator ? forge_generator_model_tag()" in tags
     assert "g_generator_facings[found] = flag->facing" in generators
 
+
+
+def spinner_values(name):
+    return re.search(rf'"{name}".*?\{{(.*?)\}}', MENU_C, re.S).group(1)
+
+
+def test_wave_squad_sizes_run_in_order_up_to_300():
+    assert menus.FIREFIGHT_CHOICES["var_ff_wave_size"][0].startswith("SMALL (50%)")
+    assert menus.FIREFIGHT_CHOICES["var_ff_wave_size"][-1].endswith("(300%)")
+    percents = [int(re.search(r"(\d+)%", label).group(1)) for label in menus.FIREFIGHT_CHOICES["var_ff_wave_size"]]
+    assert percents == [50, 100, 150, 200, 250, 300]
+    values = re.findall(r"_firefight_wave_size_(\d+)", spinner_values("ff_wave_size_spinner"))
+    assert [int(value) for value in values] == percents
+
+
+def test_floodfight_defaults_to_250_and_the_fiestas_to_random_enemy_weapons():
+    assert "TRUE, _firefight_wave_size_250" in FIREFIGHT_C
+    assert FIREFIGHT_C.count("FALSE, 0, _firefight_enemy_loadout_random") == 2
+
+
+def test_vehicle_rows_are_the_values_their_labels_say():
+    names = {"NONE": "none", "WARTHOG": "warthog", "ROCKET HOG": "rocket_warthog", "GHOST": "ghost",
+             "SCORPION": "scorpion", "BANSHEE": "banshee", "WRAITH": "wraith"}
+    for spinner in ("ff_r1_veh_spinner", "ff_r2_veh_spinner"):
+        values = re.findall(r"_firefight_early_vehicle_(\w+)", spinner_values(spinner))
+        assert values == [names[label] for label in menus.FIREFIGHT_CHOICES["var_ff_round_veh"]]
+    assert "OPTIONS_FIELD(firefight_round2_vehicle)" in MENU_C
+
+
+def test_enemy_loadout_is_on_enemy_units_page():
+    rows = [row for row in menus.FIREFIGHT_ROWS if row[1] == "enemy_loadout"]
+    assert rows and rows[0][0] == menus.FIREFIGHT_UNITS_PAGE
+    assert menus.FIREFIGHT_CHOICES["var_ff_enemy_loadout"] == ["DEFAULT", "HUMAN", "COVENANT", "RANDOMIZED"]
+    assert "op_ff2_enemy_loadout" in menu("main_menu.settings_select.multiplayer_setup.playlist_edit.firefight_edit.port.xml")
+
+
+def test_the_map_vote_is_laid_out_as_the_lobby():
+    lobby = menu("main_menu.multiplayer_type_select.lobby.xml")
+    screen = re.search(r'<widget name="[^"]*map_vote/map_vote_screen".*?</widget>', lobby, re.S).group(0)
+    assert "sel_list_desc_bkd" not in screen
+    vote = re.search(r'<widget name="[^"]*map_vote/map_vote_list".*?</widget>', lobby, re.S).group(0)
+    assert 'description="main_menu/multiplayer_type_select/lobby/lobby_desc"' in vote
+    assert '!strcmp(widget->name, "map_vote_screen")' in MENU_C
+
+
+def test_a_players_vehicle_goes_on_a_pad_or_the_maps_own_spots():
+    body = SPAWNER_C.split("void firefight_spawn_scheduled_round_vehicles(", 1)[1].split("\nstatic boolean vehicle_has_player_rider", 1)[0]
+    assert "calculate_safe_player_resupply_point" not in body
+    assert "else if (!map_vehicle_spot(vehicle_tag, &drop_pos, &drop_facing))\n\t\treturn;" in body
+
+
+def test_a_waves_zones_stay_near_the_players():
+    body = SPAWNER_C.split("static short select_wave_spawn_zones(", 1)[1].split("/* ---------- AI Actor Creation", 1)[0]
+    # (Forge's markers as well as the map's own points)
+    assert body.count("zones_keep_near(") == 2
+
+
+def test_a_destroyed_vehicle_stays_as_a_wreck():
+    assert "if (!is_wreck && !is_player_set_vehicle &&" in SPAWNER_C
+    # (off the garbage, or the first collection takes it once no one looks)
+    assert "object_set_garbage(vehicle_index, FALSE);" in SPAWNER_C.split("static void wreck_keep(", 1)[1].split("\n}\n", 1)[0]
+    # (one of the waves' whose driver died goes up; an empty one of the map's doesn't)
+    assert "if (enemy_vehicle_noted(dead_vehicles[i]) && vehicle_has_wreck_model(dead_vehicles[i]))" in SPAWNER_C
+    assert SPAWNER_C.count("enemy_vehicle_note(vehicle_index);") == 2
+    assert "firefight_wrecks_reset();" in FIREFIGHT_C
+    assert '"vehicles\\\\ghost\\\\ghost",\n\t\t"vehicles\\\\ghost\\\\ghost_mp",\n\t\t"vehicles\\\\scorpion' in RANDOMIZER_C
+
+
+def test_an_automatic_dropship_flies_straight_down_and_up():
+    route = (ROOT / "port/linux/include/halo_firefight_route.h").read_text()
+    assert "if (!has_route)\n\t\tff_route_flight_automatic(" in SPAWNER_C
+    assert route.count("= FF_ROUTE_STYLE_SKY;") == 2
+
+
+def test_a_firefight_game_takes_sixteen_bots_and_coop_three():
+    header = (ROOT / "port/linux/include/halo_firefight.h").read_text()
+    assert "FIREFIGHT_MAX_BOTS = 16," in header
+    assert "short max_pve_bots = hosting_cooperative() ? 3 : FIREFIGHT_MAX_BOTS;" in MENU_C
+    assert "pve_bots ? (long)FIREFIGHT_MAX_BOTS : (long)BOTS_MAXIMUM" in MENU_C

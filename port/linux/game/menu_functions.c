@@ -1248,7 +1248,10 @@ as the campaign is (alone, or hosted as network co-op), a multiplayer kind's
 as multiplayer maps are. DAILY CHALLENGES are the daily challenges (with
 game.daily_challenge on: community.c's past challenges, today's first), each
 played as the campaign's levels are, at its own difficulty with its own
-randomizer and skulls, alone, in split screen or hosted. */
+randomizer and skulls, alone, in split screen or hosted. FORGE MAPS are the
+custom_maps maps Forge saved (forge_custom_map_is_forge_made), played as
+CUSTOM MULTIPLAYER's are: the Map screen's, and New Game's in a Forge session,
+which lists no singleplayer kind. */
 
 enum
 {
@@ -1257,7 +1260,17 @@ enum
 	MAP_KIND_CUSTOM_SINGLEPLAYER,
 	MAP_KIND_CUSTOM_MULTIPLAYER,
 	MAP_KIND_DAILY,
+	MAP_KIND_FORGE,
 	NUMBER_OF_MAP_KINDS
+};
+
+/* which of the custom_maps maps a browse lists (map_browse_*): a list's kind
+(map_kind_browse), or a boolean `campaign` */
+enum
+{
+	MAP_BROWSE_MULTIPLAYER = FALSE,
+	MAP_BROWSE_CAMPAIGN = TRUE,
+	MAP_BROWSE_FORGE
 };
 
 /* the rows after the chooser */
@@ -1266,25 +1279,44 @@ enum
 static void visible_set(struct widget_instance *widget, boolean visible);
 static struct widget_instance *screen_of(struct widget_instance *widget);
 short ui_widget_port_multiplayer_maps(char const *const **names, short *last_used);
+extern int g_forge_session_enabled;
+int forge_custom_map_is_forge_made(short index);
 
 static boolean map_kind_singleplayer(short kind)
 {
 	return kind == MAP_KIND_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_SINGLEPLAYER || kind == MAP_KIND_DAILY;
 }
 
-/* whether the chooser may show the kind: a singleplayer one only with
-`singleplayer`, the daily challenges only with game.daily_challenge on */
-static boolean map_kind_allowed(short kind, boolean singleplayer)
+/* a kind listing the custom_maps maps, folders and all */
+static boolean map_kind_custom(short kind)
 {
-	if (!singleplayer && map_kind_singleplayer(kind))
+	return kind == MAP_KIND_CUSTOM_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_MULTIPLAYER || kind == MAP_KIND_FORGE;
+}
+
+static short map_kind_browse(short kind)
+{
+	return kind == MAP_KIND_CUSTOM_SINGLEPLAYER ? MAP_BROWSE_CAMPAIGN :
+		kind == MAP_KIND_FORGE ? MAP_BROWSE_FORGE : MAP_BROWSE_MULTIPLAYER;
+}
+
+/* whether the chooser may show the kind: a singleplayer one only with
+`singleplayer` (hosting, not Firefight) and never in a Forge session (Forge
+edits multiplayer maps),
+FORGE MAPS only with `forge_maps`, the daily challenges only with
+game.daily_challenge on */
+static boolean map_kind_allowed(short kind, boolean singleplayer, boolean forge_maps)
+{
+	if ((!singleplayer || g_forge_session_enabled) && map_kind_singleplayer(kind))
 		return FALSE;
+	if (kind == MAP_KIND_FORGE)
+		return forge_maps;
 	return kind != MAP_KIND_DAILY || (config_boolean("game.daily_challenge") && !multiplayer_firefight_mode());
 }
 
 /* The kind the chooser shows, kept to those allowed (map_kind_allowed): one
 it was turned to that is not becomes the next that is, the way it turned
 from `previous`. */
-static short map_kind_shown(struct widget_instance *list, boolean singleplayer, short previous)
+static short map_kind_shown(struct widget_instance *list, boolean singleplayer, boolean forge_maps, short previous)
 {
 	struct widget_instance *spinner = named(list, "list_item_0_map_kind_spinner", 0);
 	short kind;
@@ -1292,13 +1324,13 @@ static short map_kind_shown(struct widget_instance *list, boolean singleplayer, 
 	if (!spinner)
 		return singleplayer ? MAP_KIND_SINGLEPLAYER : MAP_KIND_MULTIPLAYER;
 	kind = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_MAP_KINDS - 1);
-	if (!map_kind_allowed(kind, singleplayer))
+	if (!map_kind_allowed(kind, singleplayer, forge_maps))
 	{
 		short step = kind == (previous + NUMBER_OF_MAP_KINDS - 1) % NUMBER_OF_MAP_KINDS ? -1 : 1;
 
 		do
 			kind = (short)((kind + step + NUMBER_OF_MAP_KINDS) % NUMBER_OF_MAP_KINDS);
-		while (!map_kind_allowed(kind, singleplayer));
+		while (!map_kind_allowed(kind, singleplayer, forge_maps));
 		spinner->parameters.list.selected_index = kind;
 	}
 	return kind;
@@ -1400,10 +1432,21 @@ struct map_browse_entry
 
 static struct map_browse_entry map_browse_entries[CUSTOM_EDITION_MAPS_MAXIMUM];
 static short map_browse_count_cache;
-static boolean map_browse_campaign_cache;
+static short map_browse_cache;
 static char map_browse_category_cache[CUSTOM_EDITION_MAP_CATEGORY_LENGTH];
 static boolean map_browse_valid;
 static boolean map_browse_sorting_campaign;
+
+static boolean map_browse_campaign(short browse)
+{
+	return browse == MAP_BROWSE_CAMPAIGN;
+}
+
+/* (a map the browse lists: FORGE MAPS' are Forge's) */
+static boolean map_browse_lists(short browse, short index)
+{
+	return browse != MAP_BROWSE_FORGE || forge_custom_map_is_forge_made(index);
+}
 
 static void map_browse_forget(void)
 {
@@ -1441,21 +1484,22 @@ static int map_browse_compare(void const *left, void const *right)
 
 /* the rows of `category` (empty: the maps folder's loose maps and its
 folders). Inside a folder the maps are already sorted by name. */
-static void map_browse_build(boolean campaign, char const *category)
+static void map_browse_build(short browse, char const *category)
 {
+	boolean campaign = map_browse_campaign(browse);
 	short total;
 	short index;
 	short count;
 	char const *open = category ? category : "";
 
-	if (map_browse_valid && map_browse_campaign_cache == campaign &&
+	if (map_browse_valid && map_browse_cache == browse &&
 		!csstrcasecmp(map_browse_category_cache, open))
 	{
 		return;
 	}
 	csstrncpy(map_browse_category_cache, open, sizeof(map_browse_category_cache) - 1);
 	map_browse_category_cache[sizeof(map_browse_category_cache) - 1] = 0;
-	map_browse_campaign_cache = campaign;
+	map_browse_cache = browse;
 	map_browse_valid = TRUE;
 	total = custom_edition_maps_count(campaign);
 	count = 0;
@@ -1465,7 +1509,7 @@ static void map_browse_build(boolean campaign, char const *category)
 		{
 			char const *map_category = custom_edition_maps_category(campaign, index);
 
-			if (map_category && !csstrcasecmp(map_category, open))
+			if (map_category && !csstrcasecmp(map_category, open) && map_browse_lists(browse, index))
 			{
 				map_browse_entries[count].folder = FALSE;
 				map_browse_entries[count].flat = index;
@@ -1480,6 +1524,8 @@ static void map_browse_build(boolean campaign, char const *category)
 			char const *map_category = custom_edition_maps_category(campaign, index);
 			short have;
 
+			if (!map_browse_lists(browse, index))
+				continue;
 			if (!map_category || !map_category[0])
 			{
 				map_browse_entries[count].folder = FALSE;
@@ -1511,16 +1557,16 @@ static void map_browse_build(boolean campaign, char const *category)
 	map_browse_count_cache = count;
 }
 
-static short map_browse_count(boolean campaign, char const *category)
+static short map_browse_count(short browse, char const *category)
 {
-	map_browse_build(campaign, category);
+	map_browse_build(browse, category);
 
 	return map_browse_count_cache;
 }
 
-static boolean map_browse_folder(boolean campaign, char const *category, short entry)
+static boolean map_browse_folder(short browse, char const *category, short entry)
 {
-	map_browse_build(campaign, category);
+	map_browse_build(browse, category);
 	if (entry < 0 || entry >= map_browse_count_cache)
 		return FALSE;
 
@@ -1528,23 +1574,23 @@ static boolean map_browse_folder(boolean campaign, char const *category, short e
 }
 
 /* the map's index, or NONE when the row is a folder or past the list */
-static short map_browse_flat(boolean campaign, char const *category, short entry)
+static short map_browse_flat(short browse, char const *category, short entry)
 {
-	map_browse_build(campaign, category);
+	map_browse_build(browse, category);
 	if (entry < 0 || entry >= map_browse_count_cache || map_browse_entries[entry].folder)
 		return NONE;
 
 	return map_browse_entries[entry].flat;
 }
 
-static char const *map_browse_folder_name(boolean campaign, char const *category, short entry)
+static char const *map_browse_folder_name(short browse, char const *category, short entry)
 {
 	char const *name;
 
-	map_browse_build(campaign, category);
+	map_browse_build(browse, category);
 	if (entry < 0 || entry >= map_browse_count_cache || !map_browse_entries[entry].folder)
 		return "";
-	name = custom_edition_maps_category(campaign, map_browse_entries[entry].flat);
+	name = custom_edition_maps_category(map_browse_campaign(browse), map_browse_entries[entry].flat);
 
 	return name ? name : "";
 }
@@ -1584,15 +1630,15 @@ static short map_browse_find(boolean campaign, char const *category, short flat)
 	return NONE;
 }
 
-static void map_browse_text(boolean campaign, char const *category, short entry, wchar_t *text)
+static void map_browse_text(short browse, char const *category, short entry, wchar_t *text)
 {
-	map_browse_build(campaign, category);
+	map_browse_build(browse, category);
 	if (entry < 0 || entry >= map_browse_count_cache)
 	{
 		text[0] = 0;
 		return;
 	}
-	map_browse_entry_text(campaign, &map_browse_entries[entry], text);
+	map_browse_entry_text(map_browse_campaign(browse), &map_browse_entries[entry], text);
 }
 
 /* the description's map (each list's has both kinds' widgets): a campaign
@@ -1787,7 +1833,7 @@ static short map_kind_count(short kind, short multiplayer_map_count, char const 
 	case MAP_KIND_DAILY:
 		return (short)(1 + community_history_count());
 	default:
-		return map_browse_count(FALSE, category);
+		return map_browse_count(map_kind_browse(kind), category);
 	}
 }
 
@@ -1950,6 +1996,7 @@ static short map_kind_display_index(short kind, short entry)
 	case MAP_KIND_CUSTOM_SINGLEPLAYER:
 		return custom_edition_maps_display_index_of(TRUE, entry);
 	case MAP_KIND_CUSTOM_MULTIPLAYER:
+	case MAP_KIND_FORGE:
 		return custom_edition_maps_display_index_of(FALSE, entry);
 	default:
 		return entry;
@@ -2027,11 +2074,11 @@ static boolean level_list_initialize(struct widget_instance *list, short control
 	map_browse_forget();
 	daily_entries_forget();
 	map_import.importing = FALSE;
-	level_list.kind = MAP_KIND_SINGLEPLAYER;
+	level_list.kind = g_forge_session_enabled ? MAP_KIND_MULTIPLAYER : MAP_KIND_SINGLEPLAYER;
 	level_list.category[0] = 0;
 	level_list.category_entry = 0;
-	level_list.chosen = level;
-	level_list.first = map_kind_first(level, NUMBER_OF_SINGLE_PLAYER_LEVELS);
+	level_list.chosen = g_forge_session_enabled ? 0 : level;
+	level_list.first = g_forge_session_enabled ? 0 : map_kind_first(level, NUMBER_OF_SINGLE_PLAYER_LEVELS);
 	map_manage_return(&level_list.kind, level_list.category, &level_list.category_entry, &level_list.first,
 		&level_list.chosen);
 	map_kind_set(list, level_list.kind);
@@ -2046,14 +2093,13 @@ static void level_row_text(short level, wchar_t *text)
 
 static void level_list_custom_text(short entry, wchar_t *text)
 {
-	map_browse_text(level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER, level_list.category, entry, text);
+	map_browse_text(map_kind_browse(level_list.kind), level_list.category, entry, text);
 }
 
 /* choosing a folder lists its maps; B (level_folder_back) returns */
 static void level_folder_open(struct widget_instance *list, short entry)
 {
-	boolean campaign = level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
-	char const *name = map_browse_folder_name(campaign, level_list.category, entry);
+	char const *name = map_browse_folder_name(map_kind_browse(level_list.kind), level_list.category, entry);
 
 	level_list.category_entry = entry;
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
@@ -2070,11 +2116,8 @@ static boolean level_folder_back(struct widget_instance *list)
 	short count;
 	short entry;
 
-	if (!level_list.category[0] ||
-		(level_list.kind != MAP_KIND_CUSTOM_SINGLEPLAYER && level_list.kind != MAP_KIND_CUSTOM_MULTIPLAYER))
-	{
+	if (!level_list.category[0] || !map_kind_custom(level_list.kind))
 		return FALSE;
-	}
 	entry = level_list.category_entry;
 	level_list.category[0] = 0;
 	map_browse_forget();
@@ -2090,7 +2133,7 @@ static boolean level_folder_back(struct widget_instance *list)
 static void level_list_update(struct widget_instance *list)
 {
 	struct widget_instance *description = list->parameters.list.extended_description;
-	short kind = map_kind_shown(list, TRUE, level_list.kind), count, entry, level;
+	short kind = map_kind_shown(list, TRUE, g_forge_session_enabled, level_list.kind), count, entry, level;
 
 	daily_overlays_hide(description);
 	map_manage_show(list, NONE, TRUE);
@@ -2129,10 +2172,9 @@ static void level_list_update(struct widget_instance *list)
 	{
 		short display = NONE;
 
-		if (kind == MAP_KIND_CUSTOM_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_MULTIPLAYER)
+		if (map_kind_custom(kind))
 		{
-			short flat = map_browse_flat(kind == MAP_KIND_CUSTOM_SINGLEPLAYER, level_list.category,
-				level_list.chosen);
+			short flat = map_browse_flat(map_kind_browse(kind), level_list.category, level_list.chosen);
 
 			if (flat != NONE)
 				display = custom_edition_maps_display_index_of(kind == MAP_KIND_CUSTOM_SINGLEPLAYER, flat);
@@ -2143,7 +2185,7 @@ static void level_list_update(struct widget_instance *list)
 		}
 		visible_set(named(description, "replay_level_right_item", 0), display != NONE);
 		map_description_show(description, NONE, display);
-		if (kind == MAP_KIND_CUSTOM_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_MULTIPLAYER)
+		if (map_kind_custom(kind))
 			map_manage_show(list, display, TRUE);
 		/* (no LEADERBOARD for a map: only the campaign's levels have records) */
 		visible_set(named(screen_of(list), "button_leaderboard", 0), FALSE);
@@ -2167,8 +2209,6 @@ static void level_list_update(struct widget_instance *list)
 	profile_name_show(description);
 }
 
-extern int g_forge_session_enabled;
-
 /* "solo level set map": the level shown, if reached, or the Custom Edition
 campaign map, for the difficulty menu; or the multiplayer map, played at
 once (FALSE: no difficulty menu). A custom folder opens and stays here. The
@@ -2179,18 +2219,18 @@ and gametype lists do the same. */
 static boolean level_choose(struct widget_instance *list, short controller)
 {
 	short level, count;
-	boolean custom, custom_campaign;
+	boolean custom;
+	short browse;
 	short flat = NONE;
 
 	level_list_update(list);
 	level = campaign.shown_level;
 	count = map_kind_count(level_list.kind, level_list.map_count, level_list.category);
-	custom = level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER ||
-		level_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER;
-	custom_campaign = level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
+	custom = map_kind_custom(level_list.kind);
+	browse = map_kind_browse(level_list.kind);
 
 	if (custom)
-		flat = map_browse_flat(custom_campaign, level_list.category, level_list.chosen);
+		flat = map_browse_flat(browse, level_list.category, level_list.chosen);
 	if (level_list.kind != MAP_KIND_SINGLEPLAYER && (level_list.chosen < 0 || level_list.chosen >= count))
 		return campaign_fail();
 	/* (a daily challenge: played at once, at its difficulty, with its
@@ -2206,12 +2246,13 @@ static boolean level_choose(struct widget_instance *list, short controller)
 		campaign_start(map_name, difficulty, controller, FALSE);
 		return FALSE;
 	}
-	if (custom && map_browse_folder(custom_campaign, level_list.category, level_list.chosen))
+	if (custom && map_browse_folder(browse, level_list.category, level_list.chosen))
 	{
 		level_folder_open(list, level_list.chosen);
 		return FALSE;
 	}
-	if (level_list.kind == MAP_KIND_MULTIPLAYER || level_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER)
+	if (level_list.kind == MAP_KIND_MULTIPLAYER || level_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER ||
+		level_list.kind == MAP_KIND_FORGE)
 	{
 		struct player_profile profile;
 		char const *map_name = level_list.kind == MAP_KIND_MULTIPLAYER ? level_list.map_names[level_list.chosen] :
@@ -10938,7 +10979,6 @@ typedef char verify_advertised_game_open_offset[offsetof(struct advertised_game,
 /* the engine's (port) */
 short ui_widget_port_multiplayer_maps(char const *const **names, short *last_used);
 boolean ui_widget_port_multiplayer_map_choose(short level_index);
-boolean ui_widget_port_campaign_map_for_gametype_choose(char const *map_name);
 boolean ui_widget_port_cooperative_level_choose(char const *map_name, short difficulty);
 short ui_widget_port_gametypes(long *indices, short maximum, short *last_used);
 boolean ui_widget_port_gametype_choose(long profile_index);
@@ -11307,19 +11347,18 @@ static void map_difficulty_text(short difficulty, wchar_t *text)
 
 static void map_list_custom_text(short entry, wchar_t *text)
 {
-	map_browse_text(map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER, map_list.category, entry, text);
+	map_browse_text(map_kind_browse(map_list.kind), map_list.category, entry, text);
 }
 
 static boolean map_list_custom(void)
 {
-	return map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER || map_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER;
+	return map_kind_custom(map_list.kind);
 }
 
 /* choosing a folder lists its maps */
 static void map_folder_open(struct widget_instance *list, short entry)
 {
-	boolean campaign = map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
-	char const *name = map_browse_folder_name(campaign, map_list.category, entry);
+	char const *name = map_browse_folder_name(map_kind_browse(map_list.kind), map_list.category, entry);
 
 	map_list.category_entry = entry;
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
@@ -11408,10 +11447,11 @@ them the level or map chosen: its picture, name and words */
 static void map_list_update(struct widget_instance *list)
 {
 	struct widget_instance *description = list->parameters.list.extended_description;
-	short kind = map_kind_shown(list, map_list.hosting || multiplayer.firefight_mode, map_list.kind), count, entry;
+	/* (a singleplayer kind's map is hosted as co-op: Firefight plays multiplayer maps) */
+	short kind = map_kind_shown(list, map_list.hosting && !multiplayer_firefight_mode(), TRUE, map_list.kind), count, entry;
 	short shown;
 	short display = NONE;
-	boolean custom = kind == MAP_KIND_CUSTOM_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_MULTIPLAYER;
+	boolean custom = map_kind_custom(kind);
 
 	daily_overlays_hide(description);
 	map_manage_show(list, NONE, FALSE);
@@ -11459,7 +11499,7 @@ static void map_list_update(struct widget_instance *list)
 	{
 		if (custom)
 		{
-			short flat = map_browse_flat(kind == MAP_KIND_CUSTOM_SINGLEPLAYER, map_list.category, shown);
+			short flat = map_browse_flat(map_kind_browse(kind), map_list.category, shown);
 
 			if (flat != NONE && (map_list.step == MAP_STEP_DIFFICULTIES || map_list.chosen < count))
 				display = custom_edition_maps_display_index_of(kind == MAP_KIND_CUSTOM_SINGLEPLAYER, flat);
@@ -11514,12 +11554,12 @@ screen (the gametypes open on TRUE). */
 static boolean map_list_choose(struct widget_instance *list, boolean *widget_deleted)
 {
 	short chosen;
-	boolean custom_campaign;
+	short browse;
 	short flat = NONE;
 
 	map_list_update(list);
 	chosen = map_list.chosen;
-	custom_campaign = map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
+	browse = map_kind_browse(map_list.kind);
 
 	if (chosen >= map_step_count())
 		return campaign_fail();
@@ -11544,13 +11584,13 @@ static boolean map_list_choose(struct widget_instance *list, boolean *widget_del
 	}
 	community_daily_cancel();
 	if (map_list.step == MAP_STEP_MAPS && map_list_custom() &&
-		map_browse_folder(custom_campaign, map_list.category, chosen))
+		map_browse_folder(browse, map_list.category, chosen))
 	{
 		map_folder_open(list, chosen);
 		return FALSE;
 	}
 	if (map_list_custom())
-		flat = map_browse_flat(custom_campaign, map_list.category,
+		flat = map_browse_flat(browse, map_list.category,
 			map_list.step == MAP_STEP_DIFFICULTIES ? map_list.level : chosen);
 	if (map_list.step == MAP_STEP_DIFFICULTIES)
 	{
@@ -11572,16 +11612,8 @@ static boolean map_list_choose(struct widget_instance *list, boolean *widget_del
 	multiplayer maps) */
 	if (map_list.kind == MAP_KIND_MULTIPLAYER)
 		return ui_widget_port_multiplayer_map_choose(chosen);
-	if (map_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER)
+	if (map_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER || map_list.kind == MAP_KIND_FORGE)
 		return ui_widget_port_multiplayer_map_choose((short)(xbox_multiplayer_map_count(map_list.map_count) + flat));
-	if (multiplayer.firefight_mode &&
-		(map_list.kind == MAP_KIND_SINGLEPLAYER || map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER))
-	{
-		char const *map_name = map_list.kind == MAP_KIND_SINGLEPLAYER ? main_get_solo_level_name(chosen) :
-			custom_map_level_name(map_list.kind, flat);
-
-		return ui_widget_port_campaign_map_for_gametype_choose(map_name);
-	}
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 	map_list.level = chosen;
 	map_step_open(list, MAP_STEP_DIFFICULTIES, (short)PIN(main_get_difficulty(), 0, NUMBER_OF_GAME_DIFFICULTY_LEVELS - 1));
@@ -12911,8 +12943,8 @@ static void server_settings_update(struct widget_instance *list)
 		/* BOTS, any multiplayer game's the player hosts (bots.c): in MAP
 		SHARING's place in a LOCAL game (no one joins it to share a map
 		with), under it in an online or LAN one (the rows then packed:
-		server_settings_pack_rows); a Firefight game's, at most three, its
-		score multiplier lowered by their skill (firefight.c); and SCORING,
+		server_settings_pack_rows); a Firefight game's, at most
+		FIREFIGHT_MAX_BOTS, its score multiplier lowered by their skill (firefight.c); and SCORING,
 		a Firefight game's (GAME SETTINGS') */
 		{
 			boolean local = multiplayer.mode == _multiplayer_mode_host_local && !cooperative;
@@ -12940,7 +12972,7 @@ static void server_settings_update(struct widget_instance *list)
 			COUNT", Firefight's "2, HEROIC (-1.5X)", or OFF) */
 			if (bots)
 			{
-				long max_bots = pve_bots ? 3L : (long)BOTS_MAXIMUM;
+				long max_bots = pve_bots ? (long)FIREFIGHT_MAX_BOTS : (long)BOTS_MAXIMUM;
 				long count = PIN(config_integer("bots.count"), 0, max_bots);
 				char const *skill = config_string("bots.skill");
 				char value[64];
@@ -17059,8 +17091,10 @@ focused, the one chosen there last (off SWITCH TEAM when it is hidden) */
 static void lobby_chat_to_buttons(struct widget_instance *screen)
 {
 	boolean preview = !strcmp(screen->name, "preview_screen");
-	struct widget_instance *list = named(screen, preview ? "preview_list" : "lobby_list", 0);
-	struct widget_instance *bar = named(list, preview ? "preview_button_bar" : "lobby_button_bar", 0);
+	boolean vote = !strcmp(screen->name, "map_vote_screen");
+	struct widget_instance *list = named(screen, preview ? "preview_list" : vote ? "map_vote_list" : "lobby_list", 0);
+	struct widget_instance *bar = named(list, preview ? "preview_button_bar" : vote ? "map_vote_button_bar" :
+		"lobby_button_bar", 0);
 
 	lobby_chat.focused = FALSE;
 	ui_play_audio_feedback_sound(SOUND_CURSOR);
@@ -17080,7 +17114,8 @@ unsigned char menu_port_list_unfocused(void *instance)
 
 	return lobby_chat.focused && lobby_chat_shown() && widget && widget->name &&
 		(!strcmp(widget->name, "lobby_list") || !strcmp(widget->name, "lobby_button_bar") ||
-		!strcmp(widget->name, "preview_list") || !strcmp(widget->name, "preview_button_bar"));
+		!strcmp(widget->name, "preview_list") || !strcmp(widget->name, "preview_button_bar") ||
+		!strcmp(widget->name, "map_vote_list") || !strcmp(widget->name, "map_vote_button_bar"));
 }
 
 /* (lobby_chat_event_taken) A in the chat: its player's menu on a line
@@ -17133,7 +17168,7 @@ static boolean lobby_chat_event_taken(struct widget_instance *widget, struct eve
 		/* (from a player's row, or from the last button: the others'
 		Right is the next button's) */
 		if (strncmp(name, "list_item_", 10) && strcmp(name, "lobby_button_leave") &&
-			strcmp(name, "preview_button_back"))
+			strcmp(name, "preview_button_back") && strcmp(name, "map_vote_button_lobby"))
 		{
 			return FALSE;
 		}
@@ -17302,7 +17337,8 @@ unsigned char menu_port_event_taken(void *instance, void *record)
 		return TRUE;
 	/* (the lobby's docked chat, and the one before joining a game under way:
 	lobby_chat_event_taken) */
-	if (widget && widget->name && (!strcmp(widget->name, "lobby_screen") || !strcmp(widget->name, "preview_screen")))
+	if (widget && widget->name && (!strcmp(widget->name, "lobby_screen") || !strcmp(widget->name, "preview_screen") ||
+		!strcmp(widget->name, "map_vote_screen")))
 	{
 		social_home.focused = FALSE;
 		return lobby_chat_event_taken(widget, event);
@@ -17896,7 +17932,8 @@ static void map_vote_update(struct widget_instance *list)
 				character);
 		}
 		gametype[index] = 0;
-		usnprintf(text, NUMBEROF(text) - 1, L"%s\r\n%d vote%s\r\n\r\n%d s left\r\n\r\n%s", gametype,
+		/* (the lobby's panel: four lines) */
+		usnprintf(text, NUMBEROF(text) - 1, L"%s\r\n%d vote%s\r\n%d s left\r\n%s", gametype,
 			status->votes[row], status->votes[row] == 1 ? L"" : L"s", status->seconds_left,
 			status->chosen == NONE ? L"A: vote" : row == status->chosen ? L"Your vote" : L"A: change vote");
 	}
@@ -18654,13 +18691,15 @@ static struct gametype_option const gametype_options[] =
 		{ 0, 1, 2, 3, 4 } },
 	{ "ff_enemy_shd_spinner", _option_option_byte, OPTIONS_FIELD(firefight_enemy_shield_scale), 0, 5,
 		{ 0, 1, 2, 3, 4 } },
-	{ "ff_wave_size_spinner", _option_option_byte, OPTIONS_FIELD(firefight_wave_size_scale), 0, 4,
-		{ 0, 1, 2, 3 } },
+	{ "ff_wave_size_spinner", _option_option_byte, OPTIONS_FIELD(firefight_wave_size_scale), 0, 6,
+		{ _firefight_wave_size_50, _firefight_wave_size_100, _firefight_wave_size_150, _firefight_wave_size_200,
+		  _firefight_wave_size_250, _firefight_wave_size_300 } },
 	{ "ff_boss_freq_spinner", _option_option_byte, OPTIONS_FIELD(firefight_boss_wave_mode), 0, 3,
 		{ 0, 1, 2 } },
-	{ "ff_ai_weapons_spinner", _option_option_byte, OPTIONS_FIELD(firefight_ai_weapon_sandbox), 0, 3,
-		{ 0, 1, 2 } },
 	/* firefight options: Page 2 (Enemy Units) */
+	{ "ff_enemy_loadout_spinner", _option_option_byte, OPTIONS_FIELD(firefight_enemy_loadout), 0, 4,
+		{ _firefight_enemy_loadout_default, _firefight_enemy_loadout_human, _firefight_enemy_loadout_covenant,
+		  _firefight_enemy_loadout_random } },
 	{ "ff_u_grunts_spinner", _option_unit_mask, 0, (1u << _ff_unit_covenant_grunts_bit), 2, { 1, 0 } },
 	{ "ff_u_jackals_spinner", _option_unit_mask, 0, (1u << _ff_unit_covenant_jackals_bit), 2, { 1, 0 } },
 	{ "ff_u_elites_spinner", _option_unit_mask, 0, (1u << _ff_unit_covenant_elites_bit), 2, { 1, 0 } },
@@ -18681,9 +18720,13 @@ static struct gametype_option const gametype_options[] =
 	{ "ff_ordnance_spinner", _option_variant_u8, VARIANT_FIELD(game_engine_variant.firefight.ordnance_drops), 0, 4,
 		{ 0, 1, 2, 3 } },
 	{ "ff_r1_veh_spinner", _option_option_byte, OPTIONS_FIELD(firefight_early_vehicle), 0, 7,
-		{ 0, 1, 2, 3, 1, 2, 3 } },
-	{ "ff_r2_veh_spinner", _option_option_byte, OPTIONS_FIELD(firefight_early_vehicle), 0, 7,
-		{ 0, 1, 2, 3, 1, 2, 3 } },
+		{ _firefight_early_vehicle_none, _firefight_early_vehicle_warthog, _firefight_early_vehicle_rocket_warthog,
+		  _firefight_early_vehicle_ghost, _firefight_early_vehicle_scorpion, _firefight_early_vehicle_banshee,
+		  _firefight_early_vehicle_wraith } },
+	{ "ff_r2_veh_spinner", _option_option_byte, OPTIONS_FIELD(firefight_round2_vehicle), 0, 7,
+		{ _firefight_early_vehicle_none, _firefight_early_vehicle_warthog, _firefight_early_vehicle_rocket_warthog,
+		  _firefight_early_vehicle_ghost, _firefight_early_vehicle_scorpion, _firefight_early_vehicle_banshee,
+		  _firefight_early_vehicle_wraith } },
 	{ "ff_r3_veh_spinner", _option_option_byte, OPTIONS_FIELD(firefight_late_vehicle), 0, 5,
 		{ _firefight_late_vehicle_none, _firefight_late_vehicle_warthog, _firefight_late_vehicle_scorpion,
 		  _firefight_late_vehicle_banshee, _firefight_late_vehicle_wraith } },
@@ -19528,8 +19571,66 @@ static void gametype_edit_name(struct widget_instance *text_box)
 	}
 }
 
-#define FF_UNIT_GUARD_HELP_STRING_INDEX 18
+#define FF_UNIT_GUARD_HELP_STRING_INDEX 22
 static unsigned long ff_unit_guard_warning_time = 0;
+
+/* the bits of ENEMY UNITS' rows the variant's faction has units of: its other
+rows are hidden */
+static unsigned short ff_faction_unit_mask(byte wave_faction)
+{
+	unsigned short covenant = (unsigned short)((1u << _ff_unit_covenant_grunts_bit) |
+		(1u << _ff_unit_covenant_jackals_bit) | (1u << _ff_unit_covenant_elites_bit) |
+		(1u << _ff_unit_covenant_specops_stealth_bit) | (1u << _ff_unit_covenant_zealots_bit) |
+		(1u << _ff_unit_covenant_hunters_bit));
+	unsigned short flood = (unsigned short)((1u << _ff_unit_flood_infection_bit) |
+		(1u << _ff_unit_flood_combat_bit) | (1u << _ff_unit_flood_carrier_bit));
+	unsigned short sentinels = (unsigned short)(1u << _ff_unit_sentinels_bit);
+	unsigned short humans = (unsigned short)((1u << _ff_unit_human_marines_bit) |
+		(1u << _ff_unit_human_odst_heavies_bit));
+
+	switch (wave_faction)
+	{
+	case _firefight_faction_covenant: return covenant;
+	case _firefight_faction_grunts: return (unsigned short)(1u << _ff_unit_covenant_grunts_bit);
+	case _firefight_faction_elites_heavies:
+		return (unsigned short)((1u << _ff_unit_covenant_elites_bit) |
+			(1u << _ff_unit_covenant_specops_stealth_bit) | (1u << _ff_unit_covenant_zealots_bit) |
+			(1u << _ff_unit_covenant_hunters_bit));
+	case _firefight_faction_flood: return flood;
+	case _firefight_faction_sentinels: return sentinels;
+	case _firefight_faction_covenant_flood: return (unsigned short)(covenant | flood);
+	case _firefight_faction_covenant_sentinels: return (unsigned short)(covenant | sentinels);
+	case _firefight_faction_flood_sentinels: return (unsigned short)(flood | sentinels);
+	case _firefight_faction_unsc_humans: return humans;
+	default: return FIREFIGHT_UNIT_MASK_ALL;
+	}
+}
+
+/* ENEMY UNITS' rows: the variant's faction's, packed under ENEMY LOADOUT */
+static void ff_unit_rows_update(struct widget_instance *list)
+{
+	unsigned short faction_mask = ff_faction_unit_mask(edit_variant()->game_engine_variant.firefight.wave_faction);
+	struct widget_instance *row;
+	short place = 0;
+
+	for (row = list->child; row; row = row->next)
+	{
+		struct widget_instance *spinner;
+		struct gametype_option const *option;
+
+		if (strncmp(row->name, "op_ff2_", 7))
+			continue;
+		for (spinner = row->child; spinner && spinner->type != 2; spinner = spinner->next)
+			;
+		option = spinner ? gametype_option_named(spinner->name) : NULL;
+		if (option && option->kind == _option_unit_mask)
+			visible_set(row, (option->argument & faction_mask) != 0);
+		if (row->visible)
+			row->vertical_offset = (short)(73 + 27 * place++);
+	}
+	if (list->focused_child && !list->focused_child->visible)
+		list->focused_child = named(list, "op_ff2_enemy_loadout", 0);
+}
 
 /* "game settings lists text update": the help of the option with the
 focus, for its value (the description's strings are each option's values'
@@ -19546,6 +19647,7 @@ static void gametype_option_help(struct widget_instance *list)
 		unsigned short candidate_unit_mask = FIREFIGHT_UNIT_MASK_ALL;
 		byte wave_faction = edit_variant()->game_engine_variant.firefight.wave_faction;
 
+		ff_unit_rows_update(list);
 		for (row = list->child; row; row = row->next)
 		{
 			if (!strncmp(row->name, "op_ff2_u_", 9))
@@ -19747,10 +19849,11 @@ static void gametype_option_help(struct widget_instance *list)
 		boolean pve_bots = hosting_cooperative() ||
 			(gametype_edit.setup && gametype_edit.setup_variant.game_engine_index == game_engine_firefight) ||
 			multiplayer.firefight_mode || multiplayer.gamemode == _gamemode_firefight;
+		short max_pve_bots = hosting_cooperative() ? 3 : FIREFIGHT_MAX_BOTS;
 		short y = 73;
 
-		if (pve_bots && count_sp->parameters.list.selected_index > 3)
-			count_sp->parameters.list.selected_index = 3;
+		if (pve_bots && count_sp->parameters.list.selected_index > max_pve_bots)
+			count_sp->parameters.list.selected_index = max_pve_bots;
 		visible_set(named(list, "op_bots_teams", 0), !pve_bots);
 		for (row = list->child; row; row = row->next)
 		{
