@@ -5197,38 +5197,38 @@ long network_game_server_port_remote_machine_count(
 	return count;
 }
 
-void network_game_server_port_refresh_map_version(void)
+/* port: refresh the pregame lobby's map version after saving or overwriting a custom map in Forge,
+and start the game once every remote machine has finished precaching */
+void custom_edition_map_paths_forget(void);
+
+void network_game_server_port_refresh_map_version(
+	void)
 {
 	struct network_game_server *server = global_network_game_server_get();
+	struct network_game_client *client = global_network_game_client_get();
 
-	if (!server || !server->game.map.name[0])
-		return;
-	custom_edition_maps_look_again();
-	server->game.map.version = custom_edition_maps_crc(server->game.map.name);
-	if (server->state != _network_game_server_state_closed)
+	custom_edition_map_paths_forget();
+	if (server && server->game.map.name[0])
 	{
-		network_game_server_flag_update(server, FLAG(_network_game_server_map_version_updated_bit));
-		network_game_server_update_client_machines(server);
-		network_game_server_advertise_game(server);
+		map_share_level_name_choose(server->game.map.name, sizeof(server->game.map.name));
+		server->game.map.version = (long)cache_files_map_version(server->game.map.name);
+		if (client)
+		{
+			struct network_game *cgame = network_game_client_get_game(client);
+			if (cgame)
+				cgame->map.version = server->game.map.version;
+		}
 	}
 }
 
 boolean network_game_server_port_start_immediately_if_precached(
 	struct network_game_server *server)
 {
-	if (!server || server->state != _network_game_server_state_pregame ||
-		TEST_FLAG(server->flags, _network_game_server_start_game_bit))
-	{
+	if (!server || server->state != _network_game_server_state_pregame || server->sent_start_game_message)
 		return FALSE;
-	}
-	if (!main_map_WaitUntilDonePrecaching())
+	if (!network_game_server_have_all_machines_have_precached(server))
 		return FALSE;
-	server->countdown_paused = FALSE;
-	server->countdown_timer = 0;
-	if (!network_game_server_start_game(server))
-		return FALSE;
-	SET_FLAG(server->flags, _network_game_server_start_game_bit, TRUE);
-	return TRUE;
+	return network_game_server_start_network_game(server);
 }
 
 /* port: a gametype's PC options: the menus' (player_ui_set_game_variant_options)
