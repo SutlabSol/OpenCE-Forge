@@ -5417,7 +5417,6 @@ int forge_ui_save_copy_as(char const *new_map_name)
 	char clean_name[64];
 	int was_already_saved = g_forge.has_saved_map_once;
 	int ok;
-	extern boolean halo_server_mode(void);
 	extern void network_game_server_port_refresh_map_version(void);
 
 	if (!new_map_name || !new_map_name[0])
@@ -6630,8 +6629,7 @@ void forge_load_saved_map_state_if_present(char const *map_name)
 	snprintf(leaf, sizeof(leaf), "%s", slash ? (slash + 1) : map_name);
 
 	{
-		extern boolean halo_server_mode(void);
-		if (halo_server_mode())
+			if (halo_server_mode())
 		{
 			forge_runtime_init();
 			snprintf(g_forge.save_map_name, sizeof(g_forge.save_map_name), "%s", leaf);
@@ -6763,7 +6761,6 @@ void forge_load_saved_map_state_if_present(char const *map_name)
 }
 
 extern unsigned long system_milliseconds(void);
-extern boolean halo_server_mode(void);
 
 static unsigned long s_forge_server_last_edit_ms = 0;
 static unsigned long s_forge_server_last_txt_save_ms = 0;
