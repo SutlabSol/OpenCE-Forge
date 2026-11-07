@@ -20,7 +20,7 @@ env:
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_MAXSIZE: 1G
-  HALO_BUILD_NUMBER: "127"
+  HALO_BUILD_NUMBER: "128"
 
 jobs:
   linux:
@@ -88,13 +88,13 @@ jobs:
           python3 tools/ci_build.py sums release
           ls -lh release
 
-          tag="build-127"
+          tag="build-128"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" release/* --clobber
-            gh release edit "$tag" --title "v0.8.1 - Content Evolved (build-127 Linux)" \
-              --notes "v0.8.1: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-127 (981b84c). Includes pre-every-game map + variant voting and expanded 256-entry server rotation support."
+            gh release edit "$tag" --title "v0.8.2 - Content Evolved (build-128 Linux)" \
+              --notes "v0.8.2: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-128 (0222e72). Includes Enemy Loadout settings, 250% Swarm / 300% Legion Firefight waves, vehicle wreck cleanup, dropship targeting fixes, friendly bot kill stat fixes, pre-every-game map + variant voting, and 256-entry server rotation support."
           else
             gh release create "$tag" release/* --target "$GITHUB_SHA" --latest \
-              --title "v0.8.1 - Content Evolved (build-127 Linux)" \
-              --notes "v0.8.1: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-127 (981b84c). Includes pre-every-game map + variant voting and expanded 256-entry server rotation support."
+              --title "v0.8.2 - Content Evolved (build-128 Linux)" \
+              --notes "v0.8.2: Linux dedicated server and client release built from Watanoge/halo-content-evolved build-128 (0222e72). Includes Enemy Loadout settings, 250% Swarm / 300% Legion Firefight waves, vehicle wreck cleanup, dropship targeting fixes, friendly bot kill stat fixes, pre-every-game map + variant voting, and 256-entry server rotation support."
           fi
