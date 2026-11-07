@@ -28,7 +28,7 @@ RUNTIME_WEAK_REFERENCES = {
     "__cxa_finalize",
     "_Jv_RegisterClasses",
     "__pthread_key_create",
-    "pthread_cancel",
+    "pthread_cancel", "halo_screen_dynamic_resolution_dropped",
 }
 
 
