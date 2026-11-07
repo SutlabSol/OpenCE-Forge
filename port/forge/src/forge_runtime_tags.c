@@ -6774,7 +6774,7 @@ static int forge_write_sidecar_state_file(char const *leaf)
 	char txt_path[512];
 	char tmp_path[512];
 	FILE *f;
-	uint32_t i;
+	int i;
 
 	if (!leaf || !leaf[0])
 		return 0;
@@ -6790,55 +6790,78 @@ static int forge_write_sidecar_state_file(char const *leaf)
 	if (!f)
 		return 0;
 
-	fprintf(f, "[OpenCE Forge Map]\n");
-	fprintf(f, "version = 2\n");
-	fprintf(f, "output_map = %s\n", leaf);
-	fprintf(f, "placed_count = %u\n", (unsigned)g_forge.edit_state.placed_object_count);
-	fprintf(f, "default_edit_count = %u\n\n", (unsigned)g_forge.edit_state.default_edit_count);
-	fprintf(f, "[ForgeState]\n");
+	fprintf(
+		f,
+		"[OpenCE Forge Map]\r\n"
+		"ForgeSource=UserCreated\r\n"
+		"Map Name: %s\r\n"
+		"Base Map: %s\r\n"
+		"Author: OpenCE : Forge Creator\r\n"
+		"Objects Placed: %d\r\n"
+		"AI Squads: %d\r\n"
+		"[ForgeState]\r\n",
+		leaf,
+		leaf,
+		(int)g_forge.edit_state.placed_object_count,
+		(int)g_forge.edit_state.ai_spawn_count);
 
-	for (i = 0; i < g_forge.edit_state.placed_object_count; i++)
-	{
-		struct forge_placed_object const *po = &g_forge.edit_state.placed_objects[i];
-		fprintf(
-			f,
-			"placed = %08X|%d|%s|%.4f|%.4f|%.4f|%.2f|%.2f|%.2f|%d|%u\n",
-			(unsigned)po->group_tag,
-			(int)po->source_cache_id,
-			po->tag_path,
-			po->x,
-			po->y,
-			po->z,
-			po->yaw,
-			po->pitch,
-			po->roll,
-			(int)po->team_index,
-			(unsigned)po->flags);
-	}
 	for (i = 0; i < g_forge.edit_state.default_edit_count; i++)
 	{
-		struct forge_default_placement_edit const *de = &g_forge.edit_state.default_edits[i];
+		struct forge_default_object_edit const *de = &g_forge.edit_state.default_edits[i];
+		if (!de->active)
+			continue;
 		fprintf(
 			f,
-			"default_edit = %u|%u|%u|%.4f|%.4f|%.4f|%.2f|%.2f|%.2f|%d\n",
-			(unsigned)de->chunk_type,
-			(unsigned)de->chunk_index,
-			(unsigned)de->deleted,
-			de->x,
-			de->y,
-			de->z,
-			de->yaw,
-			de->pitch,
-			de->roll,
-			(int)de->team_index);
+			"DEFAULT_EDIT|%u|%d|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%s\r\n",
+			(unsigned)de->group_tag,
+			(int)de->deleted,
+			de->orig_x, de->orig_y, de->orig_z,
+			de->new_x, de->new_y, de->new_z,
+			de->new_yaw, de->new_pitch, de->new_roll,
+			de->tag_path);
 	}
-	for (i = 0; i < g_forge.edit_state.ai_spawn_count; i++)
+	for (i = 0; i < g_forge.edit_state.placed_object_count; i++)
 	{
-		struct forge_ai_spawn_def const *s = &g_forge.edit_state.ai_spawns[i];
-		char line[384];
-
-		if (forge_ai_state_line_format(s, line, sizeof(line)))
-			fprintf(f, "%s\n", line);
+		struct forge_placed_object_entry const *po = &g_forge.edit_state.placed_objects[i];
+		if (!po->tag_path[0] || po->x < -90000.0f)
+			continue;
+		fprintf(
+			f,
+			"OBJECT|%u|%d|0|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%d|%s\r\n",
+			(unsigned)po->group_tag,
+			(int)po->source_cache_id,
+			po->x, po->y, po->z,
+			po->yaw, po->pitch, po->roll,
+			(int)po->team_index,
+			po->tag_path);
+	}
+	for (i = 0; i < g_forge.edit_state.ai_actor_count; i++)
+	{
+		fprintf(
+			f,
+			"%s|%s|%s\r\n",
+			g_forge.edit_state.ai_actors[i].group_tag == 'weap' ? "AI_WEAPON" : "AI_ACTOR",
+			g_forge.edit_state.ai_actors[i].map,
+			g_forge.edit_state.ai_actors[i].path);
+	}
+	if (g_forge.edit_state.ai_spawns_edited)
+	{
+		fprintf(f, "AI_SPAWNS_SAVED|%d\r\n", g_forge.edit_state.replace_ai_spawns);
+		for (i = 0; i < g_forge.edit_state.ai_spawn_count; i++)
+		{
+			struct forge_ai_spawn_entry const *ai = &g_forge.edit_state.ai_spawns[i];
+			if (!ai->active || !ai->actor_variant_path[0])
+				continue;
+			fprintf(
+				f,
+				"AI_SPAWN|%.4f|%.4f|%.4f|%.4f|%d|%d|%d|%d|%d|%u|%d|%d|%d|%d|%s|%s|fx=%d\r\n",
+				ai->x, ai->y, ai->z, ai->yaw,
+				(int)ai->team, (int)ai->unit_count,
+				(int)ai->respawn_alive, (int)ai->respawn_delay_seconds, (int)ai->respawn_total,
+				(unsigned)ai->gametype_flags,
+				(int)ai->encounter_index, (int)ai->squad_index, (int)ai->location_index, (int)ai->detached,
+				ai->actor_variant_path, ai->weapon_path, (int)ai->spawn_effect);
+		}
 	}
 	fclose(f);
 	forge_host_rename(tmp_path, txt_path);
