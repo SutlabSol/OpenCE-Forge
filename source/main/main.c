@@ -692,6 +692,7 @@ void benchmark_update(boolean main_menu_loaded);
 /* port: the Switch's link page (port/linux/src/link_page.c) */
 void link_page_update(void);
 #include "server_director.h" /* port: port/linux/game/server_director.c */
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 
 /* ---------- prototypes */
 
@@ -3554,7 +3555,9 @@ static void main_game_render(
 	/* port: a replay's playback's view, made once for the frame, before the
 	sound listens from it (port/linux/game/network_replay_playback.c) */
 	network_replay_playback_frame();
-	sound_render();
+	/* port: MENDICANT AI's training may run without sound (port/linux/game/mendicant) */
+	if (!mendicant_skip_sound_render())
+		sound_render();
 	force_single_screen = game_engine_force_single_screen();
 	last_local_player_index = NONE;
 
@@ -3633,13 +3636,18 @@ static void main_game_render(
 
 	if (global_screenshot_count.count <= 0)
 	{
-		render_frame(
-			global_screenshot_count.windows,
-			player_window_count + 1,
-			NULL,
-			NULL,
-			main_globals.movie,
-			(real)time_delta_since_tick_sec);
+		/* port: MENDICANT AI's training may run without a picture
+		(port/linux/game/mendicant) */
+		if (!mendicant_skip_render_frame())
+		{
+			render_frame(
+				global_screenshot_count.windows,
+				player_window_count + 1,
+				NULL,
+				NULL,
+				main_globals.movie,
+				(real)time_delta_since_tick_sec);
+		}
 	}
 	else
 	{

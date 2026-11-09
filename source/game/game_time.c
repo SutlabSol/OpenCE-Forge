@@ -79,6 +79,7 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "profile_sections.h" /* port: port/linux/include/profile_sections.h */
 #include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 /* port/linux/game/network_distributed.c's */
 void network_distributed_tick(void);
 
@@ -525,7 +526,11 @@ void game_time_update(
 						runs (port/linux/game/network_replay_playback.c) */
 						if (network_replay_playing())
 							network_replay_playback_tick();
+						/* port: MENDICANT AI's movement around each tick
+						(port/linux/game/mendicant) */
+						mendicant_game_tick_begin();
 						game_tick();
+						mendicant_game_tick_end();
 						profile_scope(game_time_render_interpolation_tick_section, render_interpolation_tick();)
 						game_time_globals->server_time++;
 						game_time_globals->local_time++;

@@ -33,6 +33,7 @@ symbols in this file:
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
 #include "halo_firefight.h"
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 
 /* ---------- constants */
 
@@ -209,7 +210,9 @@ action_fight_perform(
 				old_firing_position_index = actor->firing_positions.current_position_index;
 				csmemset(&search, 0, sizeof(search));
 				search.evaluation_mode = _firing_point_evaluation_mode_fight;
-				firing_position_index = actor_active_select_firing_position(
+				/* port: MENDICANT AI gives an actor it ordered its post
+				(port/linux/game/mendicant) */
+				firing_position_index = mendicant_select_firing_position(
 					actor_index,
 					&search,
 					&candidate,

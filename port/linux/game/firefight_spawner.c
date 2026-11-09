@@ -55,6 +55,7 @@ Friendly AI Reinforcements, and Round-Scheduled Player Vehicles.
 #include "bots.h"
 #include "halo_firefight.h"
 #include "halo_firefight_route.h"
+#include "halo_navmesh.h"
 #include "opence_features.h"
 #include "halo_skulls.h"
 
@@ -1796,7 +1797,23 @@ static void direct_actor_toward_unit(long actor_index, long target_unit_index)
 
 			if (!actor->control.path.path.valid && dist > 3.5f)
 			{
-				if (prop_index != NONE)
+				real_point3d nav_pts[16];
+				long nav_surfs[16];
+				boolean nav_reached = FALSE;
+				int nav_count = halo_navmesh_find_path(
+					&u_pos,
+					actor->input.pathfinding_surface_index,
+					&t_pos,
+					NONE,
+					0.4f,
+					FALSE,
+					nav_pts,
+					nav_surfs,
+					16,
+					&nav_reached);
+				if (nav_count > 2)
+					actor_move_to_point(actor_index, &nav_pts[1], nav_surfs[1], NONE);
+				else if (prop_index != NONE)
 					actor_move_to_prop(actor_index, prop_index, is_generator_target ? 3.5f : 5.0f);
 				else
 					actor_move_to_point(actor_index, &t_pos, NONE, NONE);
@@ -1804,11 +1821,38 @@ static void direct_actor_toward_unit(long actor_index, long target_unit_index)
 
 			if (magnitude_squared3d(&u->object.translational_velocity) < 0.01f && dist > 4.0f)
 			{
+				real_point3d nav_pts[8];
+				long nav_surfs[8];
+				boolean nav_reached = FALSE;
+				int nav_count = halo_navmesh_find_path(
+					&u_pos,
+					actor->input.pathfinding_surface_index,
+					&t_pos,
+					NONE,
+					0.4f,
+					FALSE,
+					nav_pts,
+					nav_surfs,
+					8,
+					&nav_reached);
+				real_point3d const *step_target = (nav_count >= 2) ? &nav_pts[1] : &t_pos;
 				real_vector3d dir;
-				vector_from_points3d(&u_pos, &t_pos, &dir);
+				vector_from_points3d(&u_pos, step_target, &dir);
 				dir.k = 0.0f;
 				if (normalize3d(&dir) > 0.0f)
 				{
+					real move_yaw = (real)atan2(dir.j, dir.i);
+					real move_throttle = 1.0f;
+					halo_navmesh_crowd_steer(
+						actor->meta.unit_index,
+						&u_pos,
+						move_yaw,
+						1.0f,
+						0.4f,
+						&move_yaw,
+						&move_throttle);
+					dir.i = (real)cos(move_yaw) * move_throttle;
+					dir.j = (real)sin(move_yaw) * move_throttle;
 					unit_port_run(actor->meta.unit_index, &dir);
 				}
 			}

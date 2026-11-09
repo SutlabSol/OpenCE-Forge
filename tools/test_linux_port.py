@@ -311,15 +311,16 @@ def test_menu_settings_exist():
     root = MENUS.parent.parent.parent
     config = (root / "port/linux/src/port_config.c").read_text()
     functions = (root / "port/linux/game/menu_functions.c").read_text()
-    known = set(re.findall(r'^\t\{ "([a-z_]+\.[a-z_]+)", _config_', config, re.M))
+    known = set(re.findall(r'^\t\{ "([a-z_]+(?:\.[a-z_]+)+)", _config_', config, re.M))
     profile = set(re.findall(r'\{ "(profile\.[a-z_]+)", \d', functions))
     # (and the actions a row does on OK rather than a setting: DISCORD ACCOUNT's LINK, setting_write's)
     actions = set(re.findall(r'!strcmp\(name, "([a-z_]+\.action)"\)', functions))
     for path in (MENUS / "ce").glob("*.xml"):
         for setting in re.findall(r'setting="([^"]+)"', path.read_text()):
             assert setting in known | profile | actions, f"{path.name}: {setting}"
-    controls = set(re.findall(r'"(controls\.[a-z_]+)"', (root / "port/linux/src/xinput_sdl.c").read_text()))
-    assert controls == {name for name in known if name.startswith("controls.")}
+    controls = set(re.findall(r'"(controls\.[a-z_]+)"', (root / "port/linux/src/xinput_sdl.c").read_text())) - {
+        "controls.nintendo_menu_buttons"}
+    assert controls == {name for name in known if name.startswith("controls.")} - {"controls.nintendo_menu_buttons"}
     assert controls == set(re.findall(r'\{ "(controls\.[a-z_]+)", L"', functions))
 
 

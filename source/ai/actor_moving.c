@@ -234,6 +234,7 @@ symbols in this file:
 #include "objects/object_types.h"
 #include "objects/objects.h"
 #include "physics/collision_model_definitions.h"
+#include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
 #undef PATH_EXTERNAL_FLEE_ROUTINES
 
 /* ---------- constants */
@@ -2292,6 +2293,11 @@ boolean actor_move_to_point(
 	struct actor_datum *actor = actor_get(actor_index);
 	boolean result = TRUE;
 
+	/* port: MENDICANT AI sends an actor it ordered to move along its own route
+	instead (port/linux/game/mendicant) */
+	if (mendicant_move_redirect(_mendicant_move_point, actor_index, destination, &result))
+		return result;
+
 	match_assert(
 		"c:\\halo\\SOURCE\\ai\\actor_moving.c",
 		951,
@@ -2328,6 +2334,11 @@ boolean actor_move_to_move_position(
 	struct actor_datum *actor = actor_get(actor_index);
 	boolean result = TRUE;
 
+	/* port: MENDICANT AI sends an actor it ordered to move along its own route
+	instead (port/linux/game/mendicant) */
+	if (mendicant_move_redirect(_mendicant_move_move_position, actor_index, NULL, &result))
+		return result;
+
 	actor->firing_positions.current_position_index = NONE;
 	actor_set_dormant(actor_index, FALSE);
 
@@ -2358,6 +2369,11 @@ boolean actor_move_to_firing_position(
 	struct actor_datum *actor = actor_get(actor_index);
 	boolean result = TRUE;
 
+	/* port: MENDICANT AI sends an actor it ordered to move along its own route
+	instead (port/linux/game/mendicant) */
+	if (mendicant_move_redirect(_mendicant_move_firing_position, actor_index, NULL, &result))
+		return result;
+
 	actor_set_dormant(actor_index, FALSE);
 
 	if (actor->control.path.destination_orders.destination_type != _destination_firing_position ||
@@ -2387,6 +2403,11 @@ boolean actor_move_to_prop(
 {
 	struct actor_datum *actor = actor_get(actor_index);
 	boolean result = TRUE;
+
+	/* port: MENDICANT AI sends an actor it ordered to move along its own route
+	instead (port/linux/game/mendicant) */
+	if (mendicant_move_redirect(_mendicant_move_prop, actor_index, NULL, &result))
+		return result;
 
 	actor->firing_positions.current_position_index = NONE;
 	actor_set_dormant(actor_index, FALSE);
@@ -3590,6 +3611,12 @@ boolean actor_move_halt(
 	long actor_index)
 {
 	struct actor_datum *actor = actor_get(actor_index);
+	boolean result; /* port: MENDICANT AI */
+
+	/* port: MENDICANT AI sends an actor it ordered to move along its own route
+	instead (port/linux/game/mendicant) */
+	if (mendicant_move_redirect(_mendicant_move_halt, actor_index, NULL, &result))
+		return result;
 
 	if (actor->input.vehicle_driver_type == _actor_vehicle_driver_directional_flying &&
 		actor->control.moving)

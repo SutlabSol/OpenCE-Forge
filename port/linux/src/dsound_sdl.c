@@ -1765,6 +1765,9 @@ static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream, int 
 	}
 }
 
+/* port/linux/game/mendicant/mendicant_main.c */
+int mendicant_skip_mixer(void);
+
 /* without a device, drain voices in real time */
 static void *silent_clock_thread(void *parameter)
 {
@@ -1776,8 +1779,11 @@ static void *silent_clock_thread(void *parameter)
 	for (;;)
 	{
 		/* (10 ms, in chunks of MIX_CHUNK_FRAMES at most) */
-		mix(buffer, 240);
-		mix(buffer, 240);
+		if (!mendicant_skip_mixer())
+		{
+			mix(buffer, 240);
+			mix(buffer, 240);
+		}
 		next.tv_nsec += 10000000L;
 		if (next.tv_nsec >= 1000000000L)
 		{

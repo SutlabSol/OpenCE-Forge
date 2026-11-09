@@ -86,6 +86,9 @@ enum
 	the Vulkan renderer's debugging rows, which its host reads) */
 	_platform_ps5 = 64,
 #endif
+	/* (of the desktop builds, only Linux: MENDICANT AI's training bridge and
+	logs, which the other builds compile out) */
+	_platform_linux = 128,
 };
 
 /* the Vulkan renderer's debugging rows: Android's, and the PS5's */
@@ -1069,6 +1072,56 @@ static const struct config_setting config_settings[] =
 	{ "bots.teams", _config_string, "\"even\"", "HALO_BOT_TEAMS", _environment_value, _platform_all,
 		"In team games: \"even\" puts the bots on both teams, evening them with\n"
 		"the players; \"against\" puts them all on the team the players are not on." },
+	{ "ai.mendicant.enabled", _config_boolean, "true", "HALO_AI_MENDICANT", _environment_value, _platform_all,
+		"MENDICANT AI: the campaign's Marines and Covenant fight as units, an\n"
+		"Elite or a sergeant leading each through drills (bounding, flanking,\n"
+		"suppressing, falling back), and each soldier picks its own way of\n"
+		"fighting. On the host of a campaign or co-op game only. false: the stock AI." },
+	{ "ai.mendicant.models", _config_boolean, "true", "HALO_AI_MENDICANT_MODELS", _environment_value, _platform_all,
+		"Let the trained models (ai.mendicant.weights) choose the drills and each\n"
+		"soldier's way of fighting; false, or no weights found: the scripted drill." },
+	{ "ai.mendicant.weights", _config_string, "\"mendicant/models.aibw\"", "HALO_AI_MENDICANT_WEIGHTS", _environment_value, _platform_all,
+		"The models' file, looked up in the mods folder's mods as a tag file is\n"
+		"(mods/<mod>/tags/mendicant/models.aibw)." },
+	{ "ai.mendicant.variety", _config_real, "1.0", "HALO_AI_MENDICANT_VARIETY", _environment_value, _platform_all,
+		"How freely the models choose among the drills they rate well: 0 always\n"
+		"the best, 1 as trained, more for more variety." },
+	{ "ai.mendicant.seed", _config_integer, "0", "HALO_AI_MENDICANT_SEED", _environment_value, _platform_all,
+		"The models' random seed; 0: a new one each map." },
+	{ "ai.mendicant.individuals", _config_boolean, "true", "HALO_AI_MENDICANT_INDIVIDUALS", _environment_value, _platform_all,
+		"Soldiers not in a unit's drill choose their own way of fighting (the\n"
+		"per-soldier models)." },
+	{ "ai.mendicant.discipline", _config_boolean, "true", "HALO_AI_MENDICANT_DISCIPLINE", _environment_value, _platform_all,
+		"Commanded soldiers hold their nerve: fewer panics, berserk charges and\n"
+		"lone pursuits." },
+	{ "ai.mendicant.targeting", _config_boolean, "true", "HALO_AI_MENDICANT_TARGETING", _environment_value, _platform_all,
+		"Soldiers choose targets by threat: what is hurting them, Elites first." },
+	{ "ai.mendicant.aim", _config_real, "1.0", "HALO_AI_MENDICANT_AIM", _environment_value, _platform_all,
+		"The AI's aim, against the stock game's 1.0." },
+	{ "ai.mendicant.aim_difficulty", _config_boolean, "true", "HALO_AI_MENDICANT_AIM_DIFFICULTY", _environment_value, _platform_all,
+		"Scale ai.mendicant.aim by the difficulty." },
+	{ "ai.mendicant.aim_moving", _config_boolean, "true", "HALO_AI_MENDICANT_AIM_MOVING", _environment_value, _platform_all,
+		"Aim worse at a target moving fast, and from a vehicle as it swerves." },
+	{ "ai.mendicant.marine_fire", _config_real, "1.8", "HALO_AI_MENDICANT_MARINE_FIRE", _environment_value, _platform_all,
+		"How fast the Marines fire, against the stock game's 1.0." },
+	{ "ai.mendicant.command_radius", _config_real, "30.0", "HALO_AI_MENDICANT_COMMAND_RADIUS", _environment_value, _platform_all,
+		"How far from its leader, in world units, a soldier is still in its unit." },
+	{ "ai.mendicant.training", _config_boolean, "false", "HALO_AI_MENDICANT_TRAINING", _environment_value, _platform_linux,
+		"Open the training bridge to brain.py (POSIX shared memory)." },
+	{ "ai.mendicant.training_skip", _config_integer, "7", "HALO_AI_MENDICANT_TRAINING_SKIP", _environment_value, _platform_linux,
+		"In training, what is skipped: the sum of 1 the picture, 2 the sound, 4 the mixer." },
+	{ "ai.mendicant.sample_log", _config_string, "\"\"", "HALO_AI_MENDICANT_SAMPLE_LOG", _environment_value, _platform_linux,
+		"A file to log every actor's decisions in (CSV); empty: none." },
+	{ "ai.mendicant.drill_log", _config_string, "\"\"", "HALO_AI_MENDICANT_DRILL_LOG", _environment_value, _platform_linux,
+		"A file to log the units' drills in; empty: none." },
+	{ "ai.mendicant.player_log", _config_string, "\"\"", "HALO_AI_MENDICANT_PLAYER_LOG", _environment_value, _platform_linux,
+		"A file to log the player's fighting in (CSV); empty: none." },
+	{ "ai.mendicant.move_test_log", _config_string, "\"\"", "HALO_AI_MENDICANT_MOVE_TEST_LOG", _environment_value, _platform_linux,
+		"A file to log a free-movement test in; empty: no test." },
+	{ "ai.mendicant.vehicle_test", _config_boolean, "false", "HALO_AI_MENDICANT_VEHICLE_TEST", _environment_value, _platform_linux,
+		"Test boarding: soldiers try the nearest vehicle." },
+	{ "ai.mendicant.aim_debug", _config_boolean, "false", "HALO_AI_MENDICANT_AIM_DEBUG", _environment_value, _platform_linux,
+		"Log the aim each actor is given." },
 	{ "bots.vehicles", _config_integer, "1", "HALO_BOT_VEHICLES", _environment_value, _platform_all,
 		"1: the bots drive and ride the map's vehicles (Warthogs, Ghosts and\n"
 		"Scorpions) to goals a long way off, and man its turrets; 0: they stay\n"
@@ -2263,7 +2316,7 @@ static const struct config_setting config_settings[] =
 #elif defined(HALO_GUEST)
 #define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_guest)
 #else
-#define CONFIG_BUILD_PLATFORM _platform_desktop
+#define CONFIG_BUILD_PLATFORM (_platform_desktop | _platform_linux)
 #endif
 
 /* a dedicated server (server.enabled, --server, HALO_SERVER: decided as the

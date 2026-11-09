@@ -238,6 +238,7 @@ extern int g_forge_session_enabled;
 #include "bots.h"
 #include "bots_combat.h"
 #include "bots_tactics.h"
+#include "halo_navmesh.h"
 #include "game_modes.h"
 #include "infection.h"
 #include "game/player_queues_new.h"
@@ -4134,41 +4135,64 @@ static void bots_search_take(struct bots_bot *bot, boolean alive)
 		}
 		csmemset(&path, 0, sizeof(path));
 		bot->via_teleporter = FALSE;
-		if (bots_search_build(bot, search, reached, &path) ||
-			(entrance && bots_distance2d(&search->start_point, &search->goal_point) < 1.0f))
 		{
-			if (bots_path_stalls(&path, &search->start_point) &&
-				bots_path_unsmoothed(&search->state_memory, &search->start_point, &path))
+			boolean built = bots_search_build(bot, search, reached, &path) ||
+				(entrance && bots_distance2d(&search->start_point, &search->goal_point) < 1.0f);
+			if (!reached || !built)
 			{
-				bots_globals.search_unsmoothed++;
+				struct path_result nav_path;
+				boolean nav_reached = FALSE;
+				if (halo_navmesh_build_path_result(
+					&search->start_point,
+					search->start_surface_index,
+					&search->goal_point,
+					search->goal_surface_index,
+					search->radius,
+					FALSE,
+					&nav_path,
+					&nav_reached,
+					NULL) && (nav_reached || !built))
+				{
+					path = nav_path;
+					reached = nav_reached;
+					built = TRUE;
+				}
 			}
-			/* port: (to a teleporter's entrance, the shortcut: onto it at
-			the path's end, as onto the last way's; on it already, onto it) */
-			if (entrance && reached)
+			if (built)
 			{
-				bot->via_teleporter = TRUE;
-				bot->via_point = search->goal_point;
-				bot->via_tick = game_time_get();
-				bot->via_index = bot->shortcut_index;
-				bot->via_climb_tick = 0;
-				bot->via_top_tick = 0;
+				if (bots_path_stalls(&path, &search->start_point) &&
+					bots_path_unsmoothed(&search->state_memory, &search->start_point, &path))
+				{
+					bots_globals.search_unsmoothed++;
+				}
+				/* port: (to a teleporter's entrance, the shortcut: onto it at
+				the path's end, as onto the last way's; on it already, onto it) */
+				if (entrance && reached)
+				{
+					bot->via_teleporter = TRUE;
+					bot->via_point = search->goal_point;
+					bot->via_tick = game_time_get();
+					bot->via_index = bot->shortcut_index;
+					bot->via_climb_tick = 0;
+					bot->via_top_tick = 0;
+				}
+				bot->path = path;
+				bot->path.step_index = 0;
+				bot->path_failures = 0;
+				/* (port: towards a teleporter's entrance it has yet to come to,
+				no climbing on to the goal: the next search from nearer) */
+				bot->path_short = !reached && !bot->via_teleporter && !entrance;
+				if (!bot->path_short)
+					bot->climb_until_tick = 0;
 			}
-			bot->path = path;
-			bot->path.step_index = 0;
-			bot->path_failures = 0;
-			/* (port: towards a teleporter's entrance it has yet to come to,
-			no climbing on to the goal: the next search from nearer) */
-			bot->path_short = !reached && !bot->via_teleporter && !entrance;
-			if (!bot->path_short)
-				bot->climb_until_tick = 0;
-		}
-		else
-		{
-			bot->path.valid = FALSE;
-			bot->path_failures++;
-			bots_globals.search_failures++;
-			if (getenv("HALO_BOT_PATH_LOG"))
-				bots_search_log_failure(bot, search, reached);
+			else
+			{
+				bot->path.valid = FALSE;
+				bot->path_failures++;
+				bots_globals.search_failures++;
+				if (getenv("HALO_BOT_PATH_LOG"))
+					bots_search_log_failure(bot, search, reached);
+			}
 		}
 		/* port: (a lane's waypoint or a vantage point it finds no way to:
 		given up, a new search) */
@@ -6731,6 +6755,17 @@ static void bots_bot_yield(struct bots_bot *bot, long bot_index, struct bots_tic
 
 	if (!tick->moving || tick->fighting || tick->object->object.parent_object_index != NONE)
 		return;
+	if (halo_navmesh_crowd_steer(
+		bot->unit_index,
+		&tick->position,
+		tick->move_direction,
+		tick->throttle_scale,
+		BOTS_PATH_RADIUS,
+		&tick->move_direction,
+		&tick->throttle_scale))
+	{
+		return;
+	}
 	for (index = 0; index < bot_index; index++)
 	{
 		struct bots_bot *other = &bots_globals.bots[index];

@@ -140,7 +140,9 @@ MBEDTLS_DIR = Path("port/third_party/mbedtls")
 # private storage (port/web/site/app.js's GAME_FILES)
 GAME_DATA_FILES = [Path("port/assets/firefight/rank_icons.bin"),
                    # (Forge's objective markers' meshes: port/forge/src/forge_runtime_tags.c)
-                   Path("port/assets/forge/forge_markers.bin")]
+                   Path("port/assets/forge/forge_markers.bin"),
+                   # (MENDICANT AI's neural network weights: port/linux/game/mendicant/mendicant_models.c)
+                   Path("port/assets/mendicant/models.aibw")]
 # internet play's UPnP (port/linux/src/posix_upnp.c)
 MINIUPNPC_DIR = Path("port/third_party/miniupnpc")
 # the Custom Edition maps' Ogg Vorbis decoder (custom_edition_sounds.c),
@@ -610,7 +612,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             add_object(source, f"{flags} {forge_source_flags(source)}")
         # Port-specific units that must see the game exactly as its own
         # sources do (port/linux/game).
-        for source in sorted(Path(config["game_sources"]).glob("*.c")):
+        for source in sorted([*Path(config["game_sources"]).glob("*.c"), *Path(config["game_sources"]).glob("mendicant/*.c")]):
             add_object(source, f"{game_cflags} {forge_source_flags(source)}")
         # (Content Extended's Forge: tools/forge_build.py)
         for source in forge_sources():

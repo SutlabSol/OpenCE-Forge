@@ -46,6 +46,7 @@
 #include "devices/devices.h"
 #include "devices/device_light_fixtures.h"
 #include "forge_engine.h"
+#include "halo_navmesh.h"
 #include "halo_ui_pointer.h"
 
 extern int halo_forge_pointer_update(int wanted, struct halo_ui_pointer *pointer);
@@ -3174,6 +3175,7 @@ int32_t forge_3d_spawn_object_at_slot(
 		{
 			inst->object_index = forge_create_configured_engine_object(
 				def_idx, group_tag, x, y, z, yaw, pitch, roll);
+			halo_navmesh_mark_dirty();
 		}
 
 		if (g_forge.edit_state.placed_object_count < FORGE_MAX_PLACED_OBJECTS)
@@ -3364,6 +3366,8 @@ void forge_3d_move_instance_ext(
 			}
 			/* (its lights with it: nothing moves a device's or scenery's in the game) */
 			object_attached_lights_moved(inst->object_index);
+			if (!is_held)
+				halo_navmesh_mark_dirty();
 		}
 		else
 		{
@@ -3456,6 +3460,7 @@ void forge_3d_delete_instance(int32_t live_idx, int broadcast_net)
 		if (forge_valid_object_get(inst->object_index))
 			object_delete(inst->object_index);
 		inst->object_index = NONE;
+		halo_navmesh_mark_dirty();
 	}
 	inst->active = 0;
 

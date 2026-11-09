@@ -158,6 +158,7 @@ their handlers open opens.
 #include "game_modes.h"
 #include "infection.h"
 #include "halo_firefight.h"
+#include "mendicant/mendicant.h" /* (Campaign AI's settings: mendicant_settings_changed) */
 #include "game/game_engine_firefight.h"
 #include "network_voice.h"
 #include "network_replay.h"
@@ -20603,6 +20604,7 @@ boolean pc_menu_event_function_invoke(
 			daily_settings_save();
 			custom_maps_folder_save();
 			platform_display_apply();
+			mendicant_settings_changed();
 		}
 		else if (!strcmp(name, "port settings defaults"))
 		{

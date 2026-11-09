@@ -479,7 +479,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         # headers the Windows C runtime lacks (pthread.h, sched.h), searched
         # after its own so that none of its headers is shadowed
         port_game_cflags = f"{game_cflags} -idirafter {posix_include}"
-        for source in sorted(Path(linux_config["game_sources"]).glob("*.c")):
+        for source in sorted([*Path(linux_config["game_sources"]).glob("*.c"), *Path(linux_config["game_sources"]).glob("mendicant/*.c")]):
             flags = port_game_cflags
             if has_forge and source.name == "menu_functions.c":
                 flags += f" -include {forge_net_override}"
@@ -665,6 +665,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
                 'os.makedirs(\'build/windows/Faber_data/custom_tags\', exist_ok=True); '
                 'os.path.isdir(\'Faber_data\') and shutil.rmtree(\'Faber_data\'); '
                 'shutil.copytree(\'build/windows/Faber_data\', \'Faber_data\', dirs_exist_ok=True); '
+                'os.path.exists(\'build/windows/models.aibw\') and shutil.copyfile(\'build/windows/models.aibw\', \'models.aibw\'); '
                 'shutil.copyfile(\'build/windows/halo.exe\', \'halo.exe\'); '
                 'shutil.copyfile(\'build/windows/SDL3.dll\', \'SDL3.dll\')"'
             ),
