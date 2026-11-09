@@ -29,6 +29,14 @@ enum
 	NUMBER_OF_NETWORK_VOTES
 };
 
+/* the host's action for a non-kick vote (_network_vote_end_game on the wire) */
+enum
+{
+	_votekick_action_end_game,
+	_votekick_action_revert_checkpoint,
+	_votekick_action_restart_map,
+};
+
 /* ---------- structures */
 
 /* the vote running, as the host counts it */
@@ -85,5 +93,9 @@ void network_votekick_machine_joined(long machine_index);
 /* (the host's server) whether a machine of the address (host byte order)
 and hardware id is kept out, kicked by a vote */
 boolean network_votekick_kept_out(unsigned long address, char const *hardware_id);
+/* (the host's chat) a machine starts or votes yes in a non-kick vote action
+(!endgame/!skip, !revert/!checkpoint, !restart), or votes yes/no (!yes/!no) */
+void network_votekick_host_chat_vote(long machine_index, short action);
+boolean network_votekick_host_chat_choice(long machine_index, boolean yes);
 
 #endif // __NETWORK_VOTEKICK_H

@@ -2093,6 +2093,17 @@ static void main_revert_map_private(
 	return;
 }
 
+boolean main_coop_vote_revert_checkpoint(
+	void)
+{
+	if (!main_coop_host())
+		return FALSE;
+	if (network_coop_wipe_reverts() && main_coop_host_revert())
+		return TRUE;
+	players_move_all_to_checkpoint();
+	return TRUE;
+}
+
 static void main_skip_cinematic_private(
 	void)
 {

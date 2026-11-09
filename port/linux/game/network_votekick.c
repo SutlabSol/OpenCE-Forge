@@ -62,10 +62,13 @@ know: its players cannot vote, and count as players who did not.
 #include "game/game.h"
 #include "game/players.h"
 #include "game/game_engine.h"
+#include "main/main.h"
 #include "networking/network_game_globals.h"
+#include "network_coop.h"
 #include "network_distributed.h"
 #include "network_votekick.h"
 #include "server_director.h"
+#include "../src/server_rotation.h"
 #include "halo_keyboard.h"
 #include "cutscene/cinematics.h"
 #include "interface/hud.h"
@@ -219,6 +222,8 @@ static struct
 	boolean active;
 	/* _network_vote_kick, _network_vote_end_game */
 	short kind;
+	/* _votekick_action_end_game, _votekick_action_revert_checkpoint, _votekick_action_restart_map */
+	short action;
 	/* the machine voted against, and its players' first (for the clients) */
 	long target_machine;
 	long target_generation;
@@ -605,6 +610,8 @@ static void votekick_recount(
 
 		votekick.needed = (short)MAX(MINIMUM_VOTES, MIN(votekick.needed, voters));
 	}
+	if (votekick.kind != _network_vote_kick && electorate == 1)
+		votekick.needed = 1;
 	votekick.electorate = electorate;
 	/* (the no votes counted as the yes are) */
 	for (index = 0; index < count; index++)
@@ -622,13 +629,21 @@ static boolean votekick_lost(
 	return votekick.no_votes > 0 && (possible < votekick.needed || possible <= votekick.no_votes);
 }
 
-/* the vote's subject for a notice: "kick Bob", "end the game" */
+/* the vote's subject for a notice: "kick Bob", "end the game",
+"reload last checkpoint", "restart the map" */
 static void votekick_subject(
 	char *text,
 	long size)
 {
 	if (votekick.kind == _network_vote_end_game)
-		snprintf(text, (size_t)size, "end the game");
+	{
+		if (votekick.action == _votekick_action_revert_checkpoint)
+			snprintf(text, (size_t)size, "reload last checkpoint");
+		else if (votekick.action == _votekick_action_restart_map)
+			snprintf(text, (size_t)size, "restart the map");
+		else
+			snprintf(text, (size_t)size, "end the game");
+	}
 	else
 		snprintf(text, (size_t)size, "kick %s", votekick.target_names);
 }
@@ -710,6 +725,27 @@ static void votekick_end_the_game(
 		game_engine_end_game();
 }
 
+static void votekick_restart_the_game(
+	void)
+{
+	if (halo_server_mode())
+	{
+		struct server_entry const *current = server_director_current();
+		char reason[160];
+
+		if (current && current->text[0])
+		{
+			server_director_interpose(current->text, reason, sizeof(reason));
+			return;
+		}
+		server_director_end_game(_server_end_vote, TRUE);
+	}
+	else if (game_in_progress())
+	{
+		main_reset_map();
+	}
+}
+
 /* why the game cannot be voted to an end now; NULL if it can */
 static char const *votekick_end_game_refused(
 	void)
@@ -723,6 +759,30 @@ static char const *votekick_end_game_refused(
 	return NULL;
 }
 
+static char const *votekick_action_refused(
+	short action)
+{
+	if (action == _votekick_action_revert_checkpoint)
+	{
+		if (!network_coop_active() || !game_in_progress())
+			return "Checkpoint reload votes are only available in Co-Op games";
+		if (game_time_get() < 10 * TICKS_PER_SECOND)
+			return "The mission has only just started";
+		return NULL;
+	}
+	if (action == _votekick_action_restart_map)
+	{
+		if (!config_boolean("network.vote_end_game"))
+			return "The host has turned map votes off";
+		if (halo_server_mode() ? !server_director_playing() : !game_in_progress())
+			return "There is no game running to restart";
+		if (game_time_get() < 15 * TICKS_PER_SECOND)
+			return "The game has only just started";
+		return NULL;
+	}
+	return votekick_end_game_refused();
+}
+
 /* the vote passed: the player kicked and kept out, or the game ended; or
 (left) the player left during a vote to kick them, which passes it too (no
 one dodges a vote by leaving), and is kept out as well */
@@ -734,6 +794,26 @@ static void votekick_pass(
 
 	if (votekick.kind == _network_vote_end_game)
 	{
+		if (votekick.action == _votekick_action_revert_checkpoint)
+		{
+			snprintf(notice, sizeof(notice), "The vote to reload last checkpoint passed (%d yes, %d no): reloading checkpoint",
+				votekick.votes, votekick.no_votes);
+			distributed_send_notice(notice);
+			error(_error_log, "vote: checkpoint reloaded by vote (%d yes, %d no)", votekick.votes, votekick.no_votes);
+			votekick_end();
+			main_coop_vote_revert_checkpoint();
+			return;
+		}
+		if (votekick.action == _votekick_action_restart_map)
+		{
+			snprintf(notice, sizeof(notice), "The vote to restart the map passed (%d yes, %d no): restarting map",
+				votekick.votes, votekick.no_votes);
+			distributed_send_notice(notice);
+			error(_error_log, "vote: map restarted by vote (%d yes, %d no)", votekick.votes, votekick.no_votes);
+			votekick_end();
+			votekick_restart_the_game();
+			return;
+		}
 		snprintf(notice, sizeof(notice), "The vote to end the game passed (%d yes, %d no): the game ends",
 			votekick.votes, votekick.no_votes);
 		distributed_send_notice(notice);
@@ -855,9 +935,10 @@ static void votekick_host_choose(
 
 /* a machine's vote (NONE: the host's own machine): a new vote of the kind
 (yes; against the player for a kick), or its choice in the one running */
-static void votekick_host_request(
+static void votekick_host_request_action(
 	long machine_index,
 	short kind,
+	short action,
 	short player_index,
 	byte choice)
 {
@@ -877,7 +958,9 @@ static void votekick_host_request(
 	/* a choice in the vote running */
 	if (votekick.active)
 	{
-		if (kind != votekick.kind || (kind == _network_vote_kick && player_index != votekick.target_player))
+		if (kind != votekick.kind ||
+			(kind == _network_vote_kick && player_index != votekick.target_player) ||
+			(kind == _network_vote_end_game && action != votekick.action))
 		{
 			votekick_subject(subject, sizeof(subject));
 			snprintf(notice, sizeof(notice), "vote: wait for the vote to %s to end", subject);
@@ -920,13 +1003,14 @@ static void votekick_host_request(
 		votekick_voter_get(target_machine, &target);
 		target.target = TRUE;
 	}
-	else if ((refused = votekick_end_game_refused()) != NULL)
+	else if ((refused = votekick_action_refused(action)) != NULL)
 	{
 		votekick_refuse(machine_index, refused);
 		return;
 	}
 	/* (the time played to start one, as for the kind) */
 	votekick.kind = kind;
+	votekick.action = action;
 	votekick_voter_get(machine_index, &voter);
 	if (kind == _network_vote_kick && votekick_same_person(&voter, &target))
 	{
@@ -982,6 +1066,7 @@ static void votekick_host_request(
 	csmemset(&votekick, 0, sizeof(votekick));
 	votekick.active = TRUE;
 	votekick.kind = kind;
+	votekick.action = action;
 	votekick.target_machine = target_machine;
 	votekick.target_player = NONE;
 	if (kind == _network_vote_kick)
@@ -1010,6 +1095,36 @@ static void votekick_host_request(
 	distributed_send_notice(notice);
 	error(_error_log, "vote: %s started by machine %ld (against machine %ld)", subject, machine_index, target_machine);
 	votekick_settle();
+}
+
+static void votekick_host_request(
+	long machine_index,
+	short kind,
+	short player_index,
+	byte choice)
+{
+	short action = votekick.active && kind == votekick.kind ? votekick.action : _votekick_action_end_game;
+
+	votekick_host_request_action(machine_index, kind, action, player_index, choice);
+}
+
+void network_votekick_host_chat_vote(
+	long machine_index,
+	short action)
+{
+	if (!votekick_host())
+		return;
+	votekick_host_request_action(machine_index, _network_vote_end_game, action, NONE, _votekick_choice_yes);
+}
+
+boolean network_votekick_host_chat_choice(
+	long machine_index,
+	boolean yes)
+{
+	if (!votekick_host() || !votekick.active)
+		return FALSE;
+	votekick_host_choose(machine_index, yes ? _votekick_choice_yes : _votekick_choice_no);
+	return TRUE;
 }
 
 void network_votekick_handle_request(
@@ -1470,6 +1585,14 @@ void network_votekick_draw(
 		}
 		name[index] = 0;
 		usprintf(text, L"Vote: kick %s", name[0] ? name : L"?");
+	}
+	else if (votekick_host() && votekick.action == _votekick_action_revert_checkpoint)
+	{
+		usprintf(text, L"Vote: reload checkpoint");
+	}
+	else if (votekick_host() && votekick.action == _votekick_action_restart_map)
+	{
+		usprintf(text, L"Vote: restart map");
 	}
 	else
 	{

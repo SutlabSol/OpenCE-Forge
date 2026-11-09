@@ -396,6 +396,8 @@ void players_note_checkpoint(
 	void);
 void players_respawn_at_checkpoint(
 	void);
+void players_move_all_to_checkpoint(
+	void);
 void players_reconnect_to_structure_bsp(
 	void);
 

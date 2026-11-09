@@ -16,7 +16,7 @@ extern "C" {
 
 /* ---------- Forge Release Version & Network Protocol Isolation (v2.4.1) */
 
-#define FORGE_VERSION_STRING "2.4.3"
+#define FORGE_VERSION_STRING "2.4.5"
 /* (this fork's own: Content Extended's Forge is 0x4628, and the two do not
 play together. The browser lists one number alone: forge_get_network_version) */
 #define FORGE_NETWORK_VERSION 0x4777

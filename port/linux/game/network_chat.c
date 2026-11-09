@@ -1535,6 +1535,40 @@ static boolean chat_host_command(
 	return TRUE;
 }
 
+static boolean chat_host_vote_or_help_command(
+	long machine_index,
+	char const *text)
+{
+	if (chat_command_word(text, "!help") || chat_command_word(text, "!commands"))
+	{
+		distributed_send_notice_to_machine(machine_index,
+			"Commands: !revert (!checkpoint), !restart, !endgame (!skip), !yes / !no (F1/F2)");
+		return TRUE;
+	}
+	if (chat_command_word(text, "!revert") || chat_command_word(text, "!checkpoint"))
+	{
+		network_votekick_host_chat_vote(machine_index, _votekick_action_revert_checkpoint);
+		return TRUE;
+	}
+	if (chat_command_word(text, "!restart"))
+	{
+		network_votekick_host_chat_vote(machine_index, _votekick_action_restart_map);
+		return TRUE;
+	}
+	if (chat_command_word(text, "!endgame") || chat_command_word(text, "!skip") || chat_command_word(text, "!next"))
+	{
+		network_votekick_host_chat_vote(machine_index, _votekick_action_end_game);
+		return TRUE;
+	}
+	if (chat_command_word(text, "!yes") || chat_command_word(text, "!no"))
+	{
+		if (!network_votekick_host_chat_choice(machine_index, chat_command_word(text, "!yes") != NULL))
+			distributed_send_notice_to_machine(machine_index, "There is no vote you can vote in");
+		return TRUE;
+	}
+	return FALSE;
+}
+
 short network_chat_host_mute_minutes(
 	short player_index)
 {
@@ -1627,6 +1661,8 @@ void network_chat_handle_up(
 		chat_host_notice(machine_index, notice);
 		return;
 	}
+	if (chat_host_vote_or_help_command(machine_index, text))
+		return;
 	/* (nor one the host's settings refuse, whatever the client knew of them:
 	the sender is told why) */
 	if ((refused = chat_refused(chat_host_config_flags(), text)) != NULL)
@@ -1734,7 +1770,7 @@ static void chat_send(
 		return;
 	}
 	/* (the host's commands, whatever its settings; a client's is not sent) */
-	if (chat_host() && chat_host_command(player_index, text))
+	if (chat_host() && (chat_host_vote_or_help_command(NONE, text) || chat_host_command(player_index, text)))
 		return;
 	if (!chat_host() && chat_command_parse(text, name, sizeof(name), &minutes) != _chat_command_none)
 	{

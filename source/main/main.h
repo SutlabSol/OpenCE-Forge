@@ -198,6 +198,7 @@ void main_roll_credits(
 	void);
 
 void main_reset_map(void);
+boolean main_coop_vote_revert_checkpoint(void);
 
 void main_stop_time(void);
 void main_start_time(void);

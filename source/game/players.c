@@ -3447,6 +3447,33 @@ void players_respawn_at_checkpoint(
 	return;
 }
 
+void players_move_all_to_checkpoint(
+	void)
+{
+	struct data_iterator iterator;
+	struct player_datum *player;
+	boolean unplaced[NETWORK_GAME_MAXIMUM_PLAYER_COUNT] = { FALSE };
+
+	players_respawn_at_checkpoint();
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		real_point3d const *position;
+
+		if (player->unit_index == NONE || player->quit_out_of_game)
+			continue;
+		position = players_checkpoint_position(iterator.datum_index);
+		unplaced[DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index)] =
+			!(position && player_teleport(iterator.datum_index, NONE, position));
+	}
+	data_iterator_new(&iterator, player_data);
+	while ((player = data_iterator_next(&iterator)) != NULL)
+	{
+		if (unplaced[DATUM_INDEX_TO_ABSOLUTE_INDEX(iterator.datum_index)])
+			player_place_beside_teammate(iterator.datum_index);
+	}
+}
+
 boolean player_position_switches_bsp(
 	real_point3d const *position)
 {
