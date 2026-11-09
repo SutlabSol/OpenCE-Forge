@@ -39,6 +39,7 @@
 #include "cache/cache_files.h"
 #include "custom_edition_cache.h"
 #include "tag_schema.h"
+#include "social_creator.h"
 #include <xtl.h>
 #include "rasterizer/xbox/rasterizer_xbox.h"
 #include "rasterizer/xbox/rasterizer_xbox_pixel_shader.h"
@@ -1634,6 +1635,9 @@ struct forge_hw_part
 	char shader_hint[128];
 	float u_scale;
 	float v_scale;
+	/* (the marker meshes': what the buffers above were copied from) */
+	void *source_vertices;
+	void *source_triangles;
 };
 
 struct forge_dynamic_tag_entry
@@ -1719,6 +1723,8 @@ boolean mod_sounds_read(
 	return orig_mod_sounds_read(permutation, buffer);
 }
 
+static void marker_meshes_dispose(void);
+
 static int s_marker_meshes_loaded_flag = 0;
 static long s_monitor_bipd_handle = NONE;
 static int s_monitor_resolved = 0;
@@ -1738,6 +1744,9 @@ void forge_runtime_on_map_unload(void)
 	}
 	s_forge_phys_allocs.count = 0;
 	s_dyn_sound_perms.count = 0;
+	/* (each level builds them again: kept, every Forge load took their memory
+	for good) */
+	marker_meshes_dispose();
 	s_marker_meshes_loaded_flag = 0;
 	s_monitor_bipd_handle = NONE;
 	s_monitor_resolved = 0;
@@ -1815,16 +1824,19 @@ static void build_hw_part_from_arrays(
 		*(float *)(vp + 64) = 0.0f;
 	}
 
-	hw_verts = XPhysicalAlloc(comp_sz, (unsigned long)-1, 0, PAGE_READWRITE);
-	if (!hw_verts)
-		hw_verts = malloc(comp_sz);
-	hw_tris = XPhysicalAlloc(idx_sz, (unsigned long)-1, 0, PAGE_READWRITE);
-	if (!hw_tris)
-		hw_tris = malloc(idx_sz);
+	/* (in the heap: the buffers below copy them into contiguous memory) */
+	hw_verts = malloc(comp_sz);
+	hw_tris = malloc(idx_sz);
 	if (!hw_verts || !hw_tris)
+	{
+		free(hw_verts);
+		free(hw_tris);
 		return;
+	}
 
 	memset(dst_part, 0, sizeof(*dst_part));
+	dst_part->source_vertices = hw_verts;
+	dst_part->source_triangles = hw_tris;
 	dst_part->u_scale = 1.0f;
 	dst_part->v_scale = 1.0f;
 	if (shader_hint && shader_hint[0])
@@ -5416,6 +5428,7 @@ int forge_ui_save_copy_as(char const *new_map_name)
 	char base_map_path[512];
 	char clean_name[64];
 	int was_already_saved = g_forge.has_saved_map_once;
+	int is_new_map = 0;
 	int ok;
 	extern void network_game_server_port_refresh_map_version(void);
 
@@ -5444,6 +5457,18 @@ int forge_ui_save_copy_as(char const *new_map_name)
 	CreateDirectoryA("custom_maps", NULL);
 #endif
 
+	/* (a name no map had: a map made, for the player card's CREATOR PROFILE) */
+	{
+		char existing_path[512];
+		FILE *existing;
+
+		snprintf(existing_path, sizeof(existing_path), "custom_maps/%s.map", clean_name);
+		existing = (FILE *)forge_host_fopen(existing_path, "rb");
+		is_new_map = existing == NULL;
+		if (existing)
+			fclose(existing);
+	}
+
 	forge_ai_saved_tags_collect();
 	ok = forge_export_scenario_map(
 		base_map_path,
@@ -5455,6 +5480,8 @@ int forge_ui_save_copy_as(char const *new_map_name)
 		extern void custom_edition_maps_look_again(void);
 		s_forge_server_dirty_txt = 0;
 		s_forge_server_dirty_map = 0;
+		if (is_new_map)
+			social_creator_add(_social_creator_forge_maps, 1);
 		platform_log("Forge: saved %s with %d campaign tags for its AI, %d AI spawns", clean_name,
 			(int)g_forge.edit_state.ai_actor_count, (int)g_forge.edit_state.ai_spawn_count);
 		custom_edition_maps_look_again();
@@ -7424,6 +7451,35 @@ static void ensure_objective_marker_meshes_loaded(void)
 			s_marker_meshes.meshes[k].valid = (s_marker_meshes.meshes[k].part_count > 0) ? 1 : 0;
 		}
 	}
+}
+
+/* as a Forge level loads, while the room kept from its tags is still there
+(level_contiguous_reserve_release): at the first draw it could be gone */
+void forge_runtime_markers_preload(void)
+{
+	ensure_objective_marker_meshes_loaded();
+}
+
+static void marker_meshes_dispose(void)
+{
+	int k, p;
+
+	for (k = 0; k < NUMBER_OF_MARKER_MESH_KINDS; k++)
+	{
+		for (p = 0; p < s_marker_meshes.meshes[k].part_count; p++)
+		{
+			struct forge_hw_part *part = &s_marker_meshes.meshes[k].parts[p];
+
+			rasterizer_triangle_buffer_delete(&part->triangle_buffer);
+			rasterizer_vertex_buffer_delete(&part->vertex_buffer);
+			free(part->source_vertices);
+			free(part->source_triangles);
+			memset(part, 0, sizeof(*part));
+		}
+		s_marker_meshes.meshes[k].part_count = 0;
+		s_marker_meshes.meshes[k].valid = 0;
+	}
+	s_marker_meshes.loaded = 0;
 }
 
 static void draw_translucent_marker_hw_parts(
