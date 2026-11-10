@@ -210,6 +210,10 @@ static void mendicant_models_strategy(struct model_bridge *bridge, int side)
 			drill = decision / 4;
 			plan_side = (decision & 1) ? 1 : -1;
 			tempo = (decision >> 1) & 1;
+			if (mendicant_config.preset == _mendicant_preset_aggressive)
+				tempo = 1;
+			else if (mendicant_config.preset == _mendicant_preset_defensive)
+				tempo = 0;
 		}
 	}
 	bridge->plan_drill = drill;

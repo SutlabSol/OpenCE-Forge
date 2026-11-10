@@ -207,6 +207,7 @@ debug.bot_trace logs each bot's state.
 #include "game/game_engine.h"
 #include "game/players.h"
 #include "halo_firefight.h"
+#include "mendicant/mendicant.h"
 extern int g_forge_session_enabled;
 #include "main/main.h"
 #include "objects/objects.h"
@@ -6565,6 +6566,11 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		bots_random_signed(bot) * skill->aim_error_degrees * 0.04f * BOTS_DEGREES;
 	bot->aim_error_pitch = bot->aim_error_pitch * settle +
 		bots_random_signed(bot) * skill->aim_error_degrees * 0.03f * BOTS_DEGREES;
+	if (mendicant_get_preset() == _mendicant_preset_sharpshooter)
+	{
+		bot->aim_error_yaw *= 0.78f;
+		bot->aim_error_pitch *= 0.78f;
+	}
 	/* (recruit's wander, the error kept at range) */
 	bots_level_aim_error(bot, tick);
 	desired_yaw = (real)atan2(dy, dx) + bot->aim_error_yaw;
@@ -6628,10 +6634,24 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		bot->strafe_until_tick = now + bots_combat_strafe_ticks(bots_globals.skill, bots_random_real(bot));
 	}
 	{
+		short preset = mendicant_get_preset();
 		real to_target = (real)atan2(dy, dx);
 		real range = bots_weapon_range(tick->weapon_index);
-		real forward = tick->target_distance > range * 1.3f ? 0.8f : tick->target_distance < range * 0.6f ? -0.5f : 0.0f;
-		real side = bot->strafe_sign * bots_combat_strafe_strength(bots_globals.skill);
+		real forward, side;
+
+		if (preset == _mendicant_preset_aggressive)
+			range *= 0.65f;
+		else if (preset == _mendicant_preset_defensive)
+			range *= 1.35f;
+		else if (preset == _mendicant_preset_sharpshooter)
+			range *= 1.45f;
+
+		forward = tick->target_distance > range * 1.3f ? 0.8f : tick->target_distance < range * 0.6f ? -0.5f : 0.0f;
+		if (preset == _mendicant_preset_aggressive && forward >= 0.0f)
+			forward = MAX(forward, 0.55f);
+		side = bot->strafe_sign * bots_combat_strafe_strength(bots_globals.skill);
+		if (preset == _mendicant_preset_flanking)
+			side *= 1.45f;
 
 		/* (Infection: a zombie straight at them, little to the side; a human
 		backs away from a zombie close by) */
@@ -7513,13 +7533,22 @@ static void bots_bot_drive(struct bots_bot *bot, struct bots_tick *tick, long ve
 	}
 	{
 		real heading = (real)atan2(vehicle->object.forward.j, vehicle->object.forward.i);
+		real v_radius = MAX(1.2f, bots_vehicle_definition(vehicle_index)->ai_pathfinding_radius);
 
+		tick->throttle_scale = fabs(bots_angle_difference(direction, heading)) > BOTS_PI * 0.5f ? 0.6f : 1.0f;
+		halo_navmesh_vehicle_convoy_steer(
+			vehicle_index,
+			&vehicle->object.position,
+			direction,
+			tick->throttle_scale,
+			v_radius,
+			&direction,
+			&tick->throttle_scale);
 		bot->ride_direction = direction;
 		bot->yaw += PIN(bots_angle_difference(direction, bot->yaw), -15.0f * BOTS_DEGREES, 15.0f * BOTS_DEGREES);
 		bot->pitch += PIN(-bot->pitch, -0.05f, 0.05f);
 		tick->moving = TRUE;
 		tick->move_direction = bot->yaw;
-		tick->throttle_scale = fabs(bots_angle_difference(direction, heading)) > BOTS_PI * 0.5f ? 0.6f : 1.0f;
 		bot->ride_driving = TRUE;
 	}
 	/* (the gun the driver's, an enemy in sight before it as it drives on:

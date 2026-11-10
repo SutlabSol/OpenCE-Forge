@@ -22,6 +22,18 @@ enum
 	_mendicant_move_point,
 };
 
+/* Tactical Personality / Doctrine Presets (ai.mendicant.preset) */
+enum
+{
+	_mendicant_preset_adaptive = 0,
+	_mendicant_preset_aggressive = 1,
+	_mendicant_preset_defensive = 2,
+	_mendicant_preset_flanking = 3,
+	_mendicant_preset_sharpshooter = 4,
+};
+
+short mendicant_get_preset(void);
+
 /* a map's start and end (ai.c) */
 void mendicant_initialize_for_new_map(void);
 void mendicant_dispose_from_old_map(void);

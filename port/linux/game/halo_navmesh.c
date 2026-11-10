@@ -53,9 +53,13 @@ void platform_log(char const *format, ...);
 #define NAV_CLIMBABLE_BIT 3
 
 #define NAV_MIN_WALKABLE_NORMAL_Z 0.65f
+#define NAV_MIN_VEHICLE_NORMAL_Z 0.76f
 #define NAV_CEILING_CLEARANCE 0.65f
 #define NAV_STEP_HEIGHT 0.45f
 #define NAV_BIPED_RADIUS 0.25f
+
+#define NAV_DEBUG_MAX_PATHS 16
+#define NAV_DEBUG_MAX_WAYPOINTS 12
 
 /* ---------- structures */
 
@@ -76,10 +80,12 @@ struct halo_nav_poly
 	real_point3d center;
 	real reach;
 	real clearance_radius;
+	real normal_z;
 	unsigned char corner_count;
 	unsigned char link_count;
 	unsigned char blocked;
 	unsigned char is_forge_surface;
+	unsigned char vehicle_passable;
 	real_point3d corners[NAV_MAX_CORNERS];
 	struct halo_nav_link links[NAV_MAX_LINKS_PER_POLY];
 };
@@ -135,6 +141,20 @@ struct halo_nav_mesh
 
 static struct halo_nav_mesh g_nav;
 static pthread_mutex_t g_nav_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+struct halo_nav_debug_path
+{
+	boolean valid;
+	long tick;
+	real agent_radius;
+	real_point3d start_point;
+	long waypoint_count;
+	real_point3d waypoints[NAV_DEBUG_MAX_WAYPOINTS];
+};
+
+static boolean g_nav_debug_overlay = FALSE;
+static struct halo_nav_debug_path g_nav_debug_paths[NAV_DEBUG_MAX_PATHS];
+static long g_nav_debug_path_cursor = 0;
 
 /* ---------- math helpers */
 
@@ -316,6 +336,8 @@ static long nav_find_closest_poly(real_point3d const *point, long surface_index,
 		if (d2d > poly->reach + 4.0f)
 			continue;
 		score = d2d + dz * 2.0f;
+		if (min_clearance >= 0.7f && !poly->vehicle_passable)
+			score += 3.5f;
 		if (score < best_score)
 		{
 			best_score = score;
@@ -429,8 +451,10 @@ static void nav_apply_dynamic_objects(struct collision_bsp const *bsp)
 						fpoly->center = hit.point;
 						fpoly->reach = h * 1.42f;
 						fpoly->clearance_radius = h;
+						fpoly->normal_z = hit.plane.n.k;
 						fpoly->corner_count = 4;
 						fpoly->is_forge_surface = 1;
+						fpoly->vehicle_passable = (hit.plane.n.k >= NAV_MIN_VEHICLE_NORMAL_Z && h >= 0.65f) ? 1 : 0;
 						fpoly->corners[0].x = hit.point.x - h;
 						fpoly->corners[0].y = hit.point.y - h;
 						fpoly->corners[0].z = hit.point.z;
@@ -789,7 +813,21 @@ static boolean nav_build_locked(void)
 				if (d > poly->reach)
 					poly->reach = d;
 			}
+			{
+				real ux = corners[1].x - corners[0].x;
+				real uy = corners[1].y - corners[0].y;
+				real uz = corners[1].z - corners[0].z;
+				real vx = corners[2].x - corners[0].x;
+				real vy = corners[2].y - corners[0].y;
+				real vz = corners[2].z - corners[0].z;
+				real nx = uy * vz - uz * vy;
+				real ny = uz * vx - ux * vz;
+				real nz = ux * vy - uy * vx;
+				real nlen = (real)sqrt(nx * nx + ny * ny + nz * nz);
+				poly->normal_z = nlen > 0.0001f ? (real)fabs(nz / nlen) : 1.0f;
+			}
 			poly->clearance_radius = 2.5f;
+			poly->vehicle_passable = poly->normal_z >= NAV_MIN_VEHICLE_NORMAL_Z ? 1 : 0;
 		}
 	}
 
@@ -829,7 +867,11 @@ static boolean nav_build_locked(void)
 			mid.z = 0.5f * (v0.z + v1.z);
 			d = nav_dist2d(&g_nav.polys[p].center, &mid);
 			if (d + 0.15f < g_nav.polys[p].clearance_radius)
+			{
 				g_nav.polys[p].clearance_radius = MAX(NAV_BIPED_RADIUS, d + 0.15f);
+				if (g_nav.polys[p].clearance_radius < 0.85f)
+					g_nav.polys[p].vehicle_passable = 0;
+			}
 		}
 	}
 
@@ -1016,6 +1058,86 @@ static long nav_funnel_smooth(
 	return count;
 }
 
+/* Smooths sharp interior turns on vehicle paths (agent_radius >= 1.0f) by
+   shifting corner waypoints outward along the interior angle bisector so
+   wide vehicles (Warthogs, Scorpions, Wraiths, Ghosts) take sweeping arcs
+   instead of clipping inner corners. */
+static void nav_smooth_vehicle_path(
+	real_point3d const *start_point,
+	struct halo_nav_waypoint *waypoints,
+	long wp_count,
+	real agent_radius)
+{
+	long i;
+
+	if (wp_count < 2 || agent_radius < 1.0f)
+		return;
+	for (i = 0; i < wp_count - 1; i++)
+	{
+		real_point3d const *prev = (i == 0) ? start_point : &waypoints[i - 1].point;
+		real_point3d *curr = &waypoints[i].point;
+		real_point3d const *next = &waypoints[i + 1].point;
+		real ax = curr->x - prev->x, ay = curr->y - prev->y;
+		real bx = next->x - curr->x, by = next->y - curr->y;
+		real alen = (real)sqrt(ax * ax + ay * ay);
+		real blen = (real)sqrt(bx * bx + by * by);
+		real dot;
+
+		if (alen < 0.8f || blen < 0.8f || waypoints[i].offmesh_type != _halo_nav_offmesh_none)
+			continue;
+		ax /= alen;
+		ay /= alen;
+		bx /= blen;
+		by /= blen;
+		dot = ax * bx + ay * by;
+		if (dot < 0.75f)
+		{
+			/* Bisector pointing toward the outer side of the turn */
+			real ox = bx - ax;
+			real oy = by - ay;
+			real olen = (real)sqrt(ox * ox + oy * oy);
+			if (olen > 0.05f)
+			{
+				real shift = MIN(agent_radius * 0.55f, MIN(alen, blen) * 0.28f);
+				real_point3d candidate = *curr;
+				long poly_idx;
+
+				candidate.x -= (ox / olen) * shift;
+				candidate.y -= (oy / olen) * shift;
+				poly_idx = nav_find_closest_poly(&candidate, waypoints[i].surface_index, agent_radius * 0.65f);
+				if (poly_idx != NONE && !g_nav.polys[poly_idx].blocked)
+				{
+					curr->x = candidate.x;
+					curr->y = candidate.y;
+				}
+			}
+		}
+	}
+}
+
+static void nav_record_debug_path(
+	real_point3d const *start_point,
+	real agent_radius,
+	struct halo_nav_waypoint const *waypoints,
+	long wp_count)
+{
+	struct halo_nav_debug_path *slot;
+	long i, n;
+
+	if (!start_point || !waypoints || wp_count <= 0)
+		return;
+	slot = &g_nav_debug_paths[g_nav_debug_path_cursor % NAV_DEBUG_MAX_PATHS];
+	g_nav_debug_path_cursor = (g_nav_debug_path_cursor + 1) % NAV_DEBUG_MAX_PATHS;
+	slot->valid = TRUE;
+	slot->tick = game_time_initialized() ? game_time_get() : 0;
+	slot->agent_radius = agent_radius;
+	slot->start_point = *start_point;
+	n = MIN(wp_count, (long)NAV_DEBUG_MAX_WAYPOINTS);
+	slot->waypoint_count = n;
+	for (i = 0; i < n; i++)
+		slot->waypoints[i] = waypoints[i].point;
+}
+
 /* ---------- public API */
 
 void halo_navmesh_mark_dirty(void)
@@ -1161,7 +1283,21 @@ long halo_navmesh_find_path(
 				continue;
 			}
 
-			tentative_g = ws->g_score[curr] + link->cost;
+			{
+				real step_cost = link->cost;
+				if (agent_radius >= 1.0f)
+				{
+					/* Vehicle layer: penalize steep slopes and tight portals so
+					   vehicles prefer wide roads, bridges, and flat canyon floors. */
+					if (!next_poly->vehicle_passable)
+						step_cost *= 2.4f;
+					else if (next_poly->normal_z < 0.92f)
+						step_cost *= (1.0f + (0.95f - next_poly->normal_z) * 2.5f);
+					if (next_poly->clearance_radius < agent_radius * 1.15f)
+						step_cost *= 1.35f;
+				}
+				tentative_g = ws->g_score[curr] + step_cost;
+			}
 			if (ws->state[next] == 0 || tentative_g < ws->g_score[next])
 			{
 				h = nav_dist3d(&next_poly->center, goal_point);
@@ -1252,6 +1388,10 @@ long halo_navmesh_find_path(
 	}
 
 	wp_count = nav_funnel_smooth(ws, portal_count, out_waypoints, max_waypoints);
+	if (agent_radius >= 1.0f && wp_count >= 2)
+		nav_smooth_vehicle_path(start_point, out_waypoints, wp_count, agent_radius);
+	if (wp_count > 0)
+		nav_record_debug_path(start_point, agent_radius, out_waypoints, wp_count);
 	if (out_reached)
 		*out_reached = reached;
 
@@ -1423,6 +1563,154 @@ boolean halo_navmesh_crowd_steer(
 	return TRUE;
 }
 
+boolean halo_navmesh_vehicle_convoy_steer(
+	long vehicle_index,
+	real_point3d const *position,
+	real desired_direction,
+	real desired_throttle,
+	real vehicle_radius,
+	real *out_direction,
+	real *out_throttle)
+{
+	struct object_iterator iterator;
+	real r = vehicle_radius > 0.8f ? vehicle_radius : 1.65f;
+	real vx, vy, avoid_x = 0.0f, avoid_y = 0.0f;
+	real throttle_scale = 1.0f;
+	long adjustments = 0;
+	unsigned long feeler_flags = FLAG(_collision_test_structure_bit) |
+		FLAG(_collision_test_front_facing_surfaces_bit) |
+		FLAG(_collision_test_objects_bit) |
+		FLAG(_collision_test_objects_scenery_bit) |
+		FLAG(_collision_test_objects_machines_bit);
+
+	if (out_direction)
+		*out_direction = desired_direction;
+	if (out_throttle)
+		*out_throttle = desired_throttle;
+	if (!position || fabs(desired_throttle) <= 0.01f || !object_header_data)
+		return FALSE;
+
+	vx = (real)cos(desired_direction);
+	vy = (real)sin(desired_direction);
+
+	/* 1. Multi-vehicle convoy spacing & friendly pedestrian avoidance */
+	object_iterator_new(&iterator, _object_mask_vehicle | _object_mask_biped, 0);
+	while (object_iterator_next(&iterator))
+	{
+		struct unit_datum *other;
+		boolean is_vehicle;
+		real dx, dy, dz, dist, detect_r;
+
+		if (iterator.index == vehicle_index)
+			continue;
+		other = unit_get(iterator.index);
+		if (TEST_FLAG(other->object.damage_flags, _object_dead_bit) ||
+			other->object.parent_object_index != NONE)
+		{
+			continue;
+		}
+		is_vehicle = TEST_FLAG(_object_mask_vehicle, other->object.type);
+		dz = (real)fabs(other->object.position.z - position->z);
+		if (dz > 2.5f)
+			continue;
+		dx = other->object.position.x - position->x;
+		dy = other->object.position.y - position->y;
+		dist = (real)sqrt(dx * dx + dy * dy);
+		detect_r = is_vehicle ? (r * 3.2f + 2.2f) : (r + 1.8f);
+		if (dist < 0.05f || dist > detect_r)
+			continue;
+
+		{
+			real nx = dx / dist;
+			real ny = dy / dist;
+			real forward_dot = vx * nx + vy * ny;
+			if (forward_dot > 0.1f)
+			{
+				real weight = (detect_r - dist) / detect_r;
+				/* Right-hand tangential passing vector */
+				real tx = ny;
+				real ty = -nx;
+				if ((vx * tx + vy * ty) < -0.1f)
+				{
+					tx = -ny;
+					ty = nx;
+				}
+				avoid_x += (-nx * 0.55f + tx * 1.10f) * weight;
+				avoid_y += (-ny * 0.55f + ty * 1.10f) * weight;
+				if (is_vehicle && forward_dot > 0.65f && dist < r * 2.4f + 1.2f)
+				{
+					/* Convoy pace matching: ease throttle behind lead vehicle */
+					throttle_scale = MIN(throttle_scale, MAX(0.35f, dist / detect_r));
+				}
+				adjustments++;
+			}
+		}
+	}
+
+	/* 2. Wide Left/Right Forward Obstacle Feelers (prevent canyon & Forge wall wedging) */
+	{
+		struct collision_result hit_l, hit_r;
+		real_point3d probe = *position;
+		real feeler_len = r + 2.0f;
+		real ang_l = desired_direction + 0.52f; /* +30 deg */
+		real ang_r = desired_direction - 0.52f; /* -30 deg */
+		real_vector3d vec_l, vec_r;
+		boolean blocked_l, blocked_r;
+
+		probe.z += 0.65f;
+		vec_l.i = (real)cos(ang_l) * feeler_len;
+		vec_l.j = (real)sin(ang_l) * feeler_len;
+		vec_l.k = 0.0f;
+		vec_r.i = (real)cos(ang_r) * feeler_len;
+		vec_r.j = (real)sin(ang_r) * feeler_len;
+		vec_r.k = 0.0f;
+
+		blocked_l = collision_test_vector(feeler_flags, &probe, &vec_l, vehicle_index, &hit_l) &&
+			hit_l.plane.n.k < NAV_MIN_WALKABLE_NORMAL_Z;
+		blocked_r = collision_test_vector(feeler_flags, &probe, &vec_r, vehicle_index, &hit_r) &&
+			hit_r.plane.n.k < NAV_MIN_WALKABLE_NORMAL_Z;
+
+		if (blocked_l && !blocked_r)
+		{
+			avoid_x += (real)cos(desired_direction - 1.1f) * 0.85f;
+			avoid_y += (real)sin(desired_direction - 1.1f) * 0.85f;
+			adjustments++;
+		}
+		else if (blocked_r && !blocked_l)
+		{
+			avoid_x += (real)cos(desired_direction + 1.1f) * 0.85f;
+			avoid_y += (real)sin(desired_direction + 1.1f) * 0.85f;
+			adjustments++;
+		}
+		else if (blocked_l && blocked_r)
+		{
+			throttle_scale = MIN(throttle_scale, 0.5f);
+			if (hit_l.t > hit_r.t)
+			{
+				avoid_x += (real)cos(desired_direction + 1.2f) * 0.95f;
+				avoid_y += (real)sin(desired_direction + 1.2f) * 0.95f;
+			}
+			else
+			{
+				avoid_x += (real)cos(desired_direction - 1.2f) * 0.95f;
+				avoid_y += (real)sin(desired_direction - 1.2f) * 0.95f;
+			}
+			adjustments++;
+		}
+	}
+
+	if (adjustments == 0)
+		return FALSE;
+
+	vx += avoid_x;
+	vy += avoid_y;
+	if ((vx * vx + vy * vy) > 0.01f && out_direction)
+		*out_direction = (real)atan2(vy, vx);
+	if (out_throttle)
+		*out_throttle = desired_throttle * throttle_scale;
+	return TRUE;
+}
+
 long halo_navmesh_sample_points(
 	real_point3d *out_points,
 	long *out_surfaces,
@@ -1466,4 +1754,194 @@ long halo_navmesh_sample_points(
 
 	pthread_mutex_unlock(&g_nav_mutex);
 	return count;
+}
+
+/* ---------- 3D Navmesh & AI Tactical Debug Overlay */
+
+void halo_navmesh_set_debug_overlay(boolean enabled)
+{
+	g_nav_debug_overlay = enabled ? TRUE : FALSE;
+}
+
+boolean halo_navmesh_get_debug_overlay(void)
+{
+	return g_nav_debug_overlay;
+}
+
+boolean halo_navmesh_toggle_debug_overlay(void)
+{
+	g_nav_debug_overlay = !g_nav_debug_overlay;
+	return g_nav_debug_overlay;
+}
+
+void halo_navmesh_get_stats(struct halo_navmesh_stats *out_stats)
+{
+	long i, now;
+
+	if (!out_stats)
+		return;
+	memset(out_stats, 0, sizeof(*out_stats));
+
+	pthread_mutex_lock(&g_nav_mutex);
+	nav_build_locked();
+	out_stats->total_polys = g_nav.poly_count;
+	out_stats->bsp_polys = g_nav.bsp_poly_count;
+	out_stats->forge_polys = g_nav.forge_poly_count;
+	out_stats->offmesh_links = g_nav.offmesh_count;
+	for (i = 0; i < g_nav.poly_count; i++)
+	{
+		if (g_nav.polys[i].blocked)
+			out_stats->blocked_polys++;
+		else if (g_nav.polys[i].vehicle_passable)
+			out_stats->vehicle_polys++;
+	}
+	now = game_time_initialized() ? game_time_get() : 0;
+	for (i = 0; i < NAV_DEBUG_MAX_PATHS; i++)
+	{
+		if (g_nav_debug_paths[i].valid && (now - g_nav_debug_paths[i].tick) <= 180)
+			out_stats->active_paths++;
+	}
+	pthread_mutex_unlock(&g_nav_mutex);
+}
+
+long halo_navmesh_get_offmesh_link(
+	long index,
+	real_point3d *out_start,
+	real_point3d *out_end,
+	short *out_type)
+{
+	long count;
+
+	pthread_mutex_lock(&g_nav_mutex);
+	count = g_nav.offmesh_count;
+	if (index >= 0 && index < count)
+	{
+		if (out_start)
+			*out_start = g_nav.offmesh[index].start_point;
+		if (out_end)
+			*out_end = g_nav.offmesh[index].end_point;
+		if (out_type)
+			*out_type = g_nav.offmesh[index].type;
+	}
+	pthread_mutex_unlock(&g_nav_mutex);
+	return count;
+}
+
+void halo_navmesh_debug_render_pieces(
+	real_point3d const *camera_pos,
+	void (*draw_piece)(float const *from, float const *to, int kind))
+{
+	long i, c, now;
+	real max_poly_dist = 36.0f;
+
+	if (!g_nav_debug_overlay || !draw_piece)
+		return;
+
+	pthread_mutex_lock(&g_nav_mutex);
+	if (!nav_build_locked() || g_nav.poly_count <= 0)
+	{
+		pthread_mutex_unlock(&g_nav_mutex);
+		return;
+	}
+
+	/* 1. Render nearby walkable BSP polygons (Cyan = 0), Forge surface polygons
+	      (Gold = 1), and Blocked obstacle polygons (Red/Orange = 2). */
+	for (i = 0; i < g_nav.poly_count; i++)
+	{
+		struct halo_nav_poly const *poly = &g_nav.polys[i];
+		int kind;
+		float z_lift;
+
+		if (poly->corner_count < 3)
+			continue;
+		if (camera_pos && !poly->is_forge_surface && !poly->blocked &&
+			nav_dist3d(camera_pos, &poly->center) > max_poly_dist)
+		{
+			continue;
+		}
+		if (poly->blocked)
+		{
+			kind = 2; /* Red/Orange: blocked by Forge obstacle */
+			z_lift = 0.08f;
+		}
+		else if (poly->is_forge_surface)
+		{
+			kind = 1; /* Gold: walkable Forge ramp/platform */
+			z_lift = 0.07f;
+		}
+		else
+		{
+			kind = 0; /* Cyan: walkable BSP polygon */
+			z_lift = 0.04f;
+		}
+		for (c = 0; c < poly->corner_count; c++)
+		{
+			long next_c = (c + 1) % poly->corner_count;
+			float p0[3], p1[3];
+
+			p0[0] = poly->corners[c].x;
+			p0[1] = poly->corners[c].y;
+			p0[2] = poly->corners[c].z + z_lift;
+			p1[0] = poly->corners[next_c].x;
+			p1[1] = poly->corners[next_c].y;
+			p1[2] = poly->corners[next_c].z + z_lift;
+			draw_piece(p0, p1, kind);
+		}
+	}
+
+	/* 2. Render Off-Mesh Connections:
+	      - Teleporters (Purple = 4)
+	      - Climbable Ladders (Gold = 1)
+	      - One-Way Ledge Drops (Red/Orange = 2) */
+	for (i = 0; i < g_nav.offmesh_count; i++)
+	{
+		struct halo_nav_offmesh const *om = &g_nav.offmesh[i];
+		float p0[3], p1[3];
+		int kind = (om->type == _halo_nav_offmesh_teleporter) ? 4 :
+			(om->type == _halo_nav_offmesh_ladder ? 1 : 2);
+
+		if (om->type == _halo_nav_offmesh_jump_down && camera_pos &&
+			nav_dist3d(camera_pos, &om->start_point) > max_poly_dist)
+		{
+			continue;
+		}
+		p0[0] = om->start_point.x;
+		p0[1] = om->start_point.y;
+		p0[2] = om->start_point.z + 0.15f;
+		p1[0] = om->end_point.x;
+		p1[1] = om->end_point.y;
+		p1[2] = om->end_point.z + 0.15f;
+		draw_piece(p0, p1, kind);
+	}
+
+	/* 3. Render Active Smoothed Funnel Paths:
+	      - Biped AI / Bot paths (Emerald Green = 3)
+	      - Vehicle AI / Bot paths (Purple = 4) */
+	now = game_time_initialized() ? game_time_get() : 0;
+	for (i = 0; i < NAV_DEBUG_MAX_PATHS; i++)
+	{
+		struct halo_nav_debug_path const *dp = &g_nav_debug_paths[i];
+		int kind;
+		float prev[3];
+
+		if (!dp->valid || dp->waypoint_count <= 0 || (now - dp->tick) > 180)
+			continue;
+		kind = dp->agent_radius >= 1.0f ? 4 : 3;
+		prev[0] = dp->start_point.x;
+		prev[1] = dp->start_point.y;
+		prev[2] = dp->start_point.z + 0.16f;
+		for (c = 0; c < dp->waypoint_count; c++)
+		{
+			float curr[3];
+			curr[0] = dp->waypoints[c].x;
+			curr[1] = dp->waypoints[c].y;
+			curr[2] = dp->waypoints[c].z + 0.16f;
+			draw_piece(prev, curr, kind);
+			prev[0] = curr[0];
+			prev[1] = curr[1];
+			prev[2] = curr[2];
+		}
+	}
+
+	pthread_mutex_unlock(&g_nav_mutex);
 }

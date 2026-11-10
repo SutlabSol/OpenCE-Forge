@@ -33,6 +33,7 @@ vehicle_try) with the same behaviour.
 #include "tag_files/tag_files.h"
 
 #include "mendicant_internal.h"
+#include "../halo_navmesh.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -73,6 +74,10 @@ static struct
 	long unit, vehicle;
 	boolean hunts;
 	long stuck_since, reverse_until;
+	struct halo_nav_waypoint path[16];
+	short path_count, path_step;
+	long path_time;
+	real_point3d path_goal;
 } autopilot[VEHICLE_DRIVERS];
 static long chief_vehicle_last = NONE;
 static long vehicle_decide_time;
@@ -306,6 +311,9 @@ static void autopilot_add(long unit, long vehicle, boolean hunts)
 			autopilot[slot].hunts = hunts;
 			autopilot[slot].stuck_since = -1;
 			autopilot[slot].reverse_until = 0;
+			autopilot[slot].path_count = 0;
+			autopilot[slot].path_step = 0;
+			autopilot[slot].path_time = 0;
 			return;
 		}
 	}
@@ -362,16 +370,83 @@ static void autopilot_update(long time)
 		dx = target.x - vehicle->object.position.x;
 		dy = target.y - vehicle->object.position.y;
 		distance = (real)sqrt(dx * dx + dy * dy) + 0.001f;
-		facing.i = dx / distance;
-		facing.j = dy / distance;
-		facing.k = 0.0f;
-		throttle = distance > stop ? 1.0f : 0.0f;
-		if (autopilot[slot].hunts && distance <= stop)
+		if (distance > stop)
 		{
-			/* circle the enemy so the gunner keeps firing */
-			facing.i = -dy / distance;
-			facing.j = dx / distance;
-			throttle = 0.6f;
+			int vkind = vehicle_kind(vehicle->definition_index);
+			real v_radius = (vkind == VEHICLE_GHOST) ? 1.15f :
+				((vkind == VEHICLE_WRAITH || vkind == VEHICLE_SCORPION) ? 1.95f : 1.65f);
+			real gdx = target.x - autopilot[slot].path_goal.x;
+			real gdy = target.y - autopilot[slot].path_goal.y;
+
+			if (autopilot[slot].path_count <= 0 ||
+				autopilot[slot].path_step >= autopilot[slot].path_count ||
+				time - autopilot[slot].path_time >= 20 ||
+				(gdx * gdx + gdy * gdy) > 9.0f)
+			{
+				boolean reached = FALSE;
+				long wp_n = halo_navmesh_find_path(
+					&vehicle->object.position, NONE,
+					&target, NONE,
+					v_radius, FALSE,
+					autopilot[slot].path, 16, &reached, NULL);
+				autopilot[slot].path_count = (short)wp_n;
+				autopilot[slot].path_step = 0;
+				autopilot[slot].path_time = time;
+				autopilot[slot].path_goal = target;
+			}
+			while (autopilot[slot].path_step < autopilot[slot].path_count - 1)
+			{
+				real wdx = autopilot[slot].path[autopilot[slot].path_step].point.x - vehicle->object.position.x;
+				real wdy = autopilot[slot].path[autopilot[slot].path_step].point.y - vehicle->object.position.y;
+				if ((wdx * wdx + wdy * wdy) <= (v_radius + 1.6f) * (v_radius + 1.6f))
+					autopilot[slot].path_step++;
+				else
+					break;
+			}
+			if (autopilot[slot].path_step < autopilot[slot].path_count)
+			{
+				real wdx = autopilot[slot].path[autopilot[slot].path_step].point.x - vehicle->object.position.x;
+				real wdy = autopilot[slot].path[autopilot[slot].path_step].point.y - vehicle->object.position.y;
+				real wdist = (real)sqrt(wdx * wdx + wdy * wdy);
+				if (wdist > 0.25f)
+				{
+					dx = wdx;
+					dy = wdy;
+				}
+			}
+		}
+		{
+			real steer_len = (real)sqrt(dx * dx + dy * dy) + 0.001f;
+			real dir_rad = (real)atan2(dy, dx);
+			int vkind = vehicle_kind(vehicle->definition_index);
+			real v_radius = (vkind == VEHICLE_GHOST) ? 1.15f :
+				((vkind == VEHICLE_WRAITH || vkind == VEHICLE_SCORPION) ? 1.95f : 1.65f);
+
+			facing.i = dx / steer_len;
+			facing.j = dy / steer_len;
+			facing.k = 0.0f;
+			throttle = distance > stop ? 1.0f : 0.0f;
+			if (autopilot[slot].hunts && distance <= stop)
+			{
+				/* circle the enemy so the gunner keeps firing */
+				facing.i = -dy / steer_len;
+				facing.j = dx / steer_len;
+				dir_rad = (real)atan2(facing.j, facing.i);
+				throttle = 0.6f;
+			}
+			if (throttle > 0.0f &&
+				halo_navmesh_vehicle_convoy_steer(
+					autopilot[slot].vehicle,
+					&vehicle->object.position,
+					dir_rad,
+					throttle,
+					v_radius,
+					&dir_rad,
+					&throttle))
+			{
+				facing.i = (real)cos(dir_rad);
+				facing.j = (real)sin(dir_rad);
+			}
 		}
 		speed = vehicle_speed(vehicle);
 		if (throttle > 0.0f && speed < 0.5f)
@@ -408,6 +483,9 @@ void mendicant_vehicles_reset(
 		autopilot[slot].hunts = FALSE;
 		autopilot[slot].stuck_since = -1;
 		autopilot[slot].reverse_until = 0;
+		autopilot[slot].path_count = 0;
+		autopilot[slot].path_step = 0;
+		autopilot[slot].path_time = 0;
 	}
 	memset(vehicle_tried, 0, sizeof(vehicle_tried));
 	chief_vehicle_last = NONE;

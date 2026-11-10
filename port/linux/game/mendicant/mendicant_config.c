@@ -17,12 +17,33 @@ this build with no change but the binary's path.
 #include <string.h>
 
 #include "mendicant_internal.h"
+#include "../halo_navmesh.h"
 
 /* port/linux/src/port_config.c */
 int config_boolean(char const *name);
 long config_integer(char const *name);
 double config_real(char const *name);
 char const *config_string(char const *name);
+
+static short mendicant_parse_preset(char const *s)
+{
+	if (!s || !s[0])
+		return _mendicant_preset_adaptive;
+	if (strcmp(s, "aggressive") == 0)
+		return _mendicant_preset_aggressive;
+	if (strcmp(s, "defensive") == 0)
+		return _mendicant_preset_defensive;
+	if (strcmp(s, "flanking") == 0)
+		return _mendicant_preset_flanking;
+	if (strcmp(s, "sharpshooter") == 0)
+		return _mendicant_preset_sharpshooter;
+	return _mendicant_preset_adaptive;
+}
+
+short mendicant_get_preset(void)
+{
+	return mendicant_config.preset;
+}
 
 /* ---------- constants */
 
@@ -87,6 +108,8 @@ boolean mendicant_config_read(
 	config->aim_moving = config_boolean("ai.mendicant.aim_moving") != 0;
 	config->marine_fire = (real)config_real("ai.mendicant.marine_fire");
 	config->command_radius = (real)config_real("ai.mendicant.command_radius");
+	config->preset = mendicant_parse_preset(config_string("ai.mendicant.preset"));
+	halo_navmesh_set_debug_overlay(config_boolean("ai.navmesh.debug_overlay") != 0);
 #ifdef MENDICANT_LEGACY_ENVIRONMENT
 	/* the training bridge, its runs and its logs: desktop Linux only */
 	mendicant_config_copy_string(config->bridge, sizeof(config->bridge), config_string("ai.mendicant.bridge"));

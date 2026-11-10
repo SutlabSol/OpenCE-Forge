@@ -661,12 +661,16 @@ _video["categories"] = [
 # map's start; the others at once (menu_functions.c's "port settings save"
 # calls mendicant_settings_changed)
 SCREENS["video_settings/campaign_ai"] = {
-    "screen": "campaign_ai_settings_screen", "header": _video["header"], "spacing": 30,
+    "screen": "campaign_ai_settings_screen", "header": _video["header"], "spacing": 27,
     "rows": [
         ("MENDICANT AI:", "ai.mendicant.enabled", ON_OFF,
          "Marines and Covenant fight as units, led through\ndrills. From the next map; off: the stock AI.", None),
         ("TRAINED MODELS:", "ai.mendicant.models", ON_OFF,
          "Trained models choose the drills and each\nsoldier's way of fighting. From the next map.", None),
+        ("TACTICAL PRESET:", "ai.mendicant.preset",
+         [("ADAPTIVE", "adaptive"), ("AGGRESSIVE", "aggressive"), ("DEFENSIVE", "defensive"),
+          ("FLANKING", "flanking"), ("SHARPSHOOTER", "sharpshooter")],
+         "Tactical doctrine preset for Campaign AI,\nFirefight squads, and Multiplayer bots.", None),
         ("INDIVIDUALS:", "ai.mendicant.individuals", ON_OFF,
          "Soldiers outside a unit's drill choose their own\nway of fighting.", None),
         ("DRILL VARIETY:", "ai.mendicant.variety",
@@ -681,6 +685,8 @@ SCREENS["video_settings/campaign_ai"] = {
         ("UNIT RADIUS:", "ai.mendicant.command_radius",
          [(str(units), str(units)) for units in (15, 20, 25, 30, 35, 40, 50, 60)],
          "How far from its leader, in world units, a\nsoldier is still in its unit.", None),
+        ("NAVMESH OVERLAY:", "ai.navmesh.debug_overlay", ON_OFF,
+         "Render 3D navigation mesh polygons, Forge ramps,\noff-mesh links, and AI paths in Monitor Mode (F9).", None),
     ],
     "categories": [
         ("AIM AND FIRE:", "video_settings/campaign_ai/aim_fire",

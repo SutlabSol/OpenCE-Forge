@@ -1834,6 +1834,61 @@ static unsigned long long counter_chains(int heavy)
 	return mask;
 }
 
+static unsigned long long preset_chains(short preset)
+{
+	static char const *const aggressive[] = {
+		"c_shock_assault", "c_stick_and_blow", "c_pursuit", "c_advance_to_contact",
+		"m_bounding_assault", "m_pursuit", "m_movement_to_contact"
+	};
+	static char const *const defensive[] = {
+		"c_perimeter_defense", "c_defense_in_depth", "c_hold_and_fix", "c_fighting_withdrawal",
+		"m_perimeter_defense", "m_defense_in_depth", "m_hasty_defense_counter", "m_fighting_withdrawal"
+	};
+	static char const *const flanking[] = {
+		"c_pincer", "c_elite_flank", "c_lure", "c_cut_off",
+		"m_fix_and_flank", "m_pincer"
+	};
+	static char const *const sharpshooter[] = {
+		"c_kill_zone", "c_elite_ambush", "c_hold_and_fix",
+		"m_far_ambush", "m_hasty_defense_counter", "m_perimeter_defense"
+	};
+	char const *const *list = NULL;
+	unsigned int list_count = 0, index;
+	unsigned long long mask = 0;
+	int chain;
+
+	switch (preset)
+	{
+	case _mendicant_preset_aggressive:
+		list = aggressive;
+		list_count = sizeof(aggressive) / sizeof(*aggressive);
+		break;
+	case _mendicant_preset_defensive:
+		list = defensive;
+		list_count = sizeof(defensive) / sizeof(*defensive);
+		break;
+	case _mendicant_preset_flanking:
+		list = flanking;
+		list_count = sizeof(flanking) / sizeof(*flanking);
+		break;
+	case _mendicant_preset_sharpshooter:
+		list = sharpshooter;
+		list_count = sizeof(sharpshooter) / sizeof(*sharpshooter);
+		break;
+	default:
+		return ~(unsigned long long)0;
+	}
+	for (chain = 0; chain < CHAINS; chain++)
+	{
+		for (index = 0; index < list_count; index++)
+		{
+			if (!strcmp(chain_names[chain], list[index]))
+				mask |= (unsigned long long)1 << chain;
+		}
+	}
+	return mask;
+}
+
 /* the strategies that suit the moment, as a bit per chain: before contact,
 those that open at rest (a posture, a movement to contact); in contact, any
 attack or defense (a posture opens at its stand-to); falling back only once
@@ -1880,6 +1935,12 @@ static unsigned long long opening_mask(int key, struct mendicant_member *members
 	counter = mask & counter_chains(heavy);
 	if (counter && cmd[key].counter_until && mendicant_time() < cmd[key].counter_until)
 		return counter;
+	if (mendicant_config.preset != _mendicant_preset_adaptive)
+	{
+		unsigned long long preferred = mask & preset_chains(mendicant_config.preset);
+		if (preferred)
+			return preferred;
+	}
 	return mask ? mask : fallback;
 }
 
@@ -1888,7 +1949,7 @@ static void drill_start_random(int key, struct mendicant_member *members, int co
 	struct mendicant_geometry const *geometry, long time)
 {
 	unsigned long long mask = opening_mask(key, members, count);
-	int choices[CHAINS], found = 0, chain;
+	int choices[CHAINS], found = 0, chain, tempo;
 	unsigned long choice;
 
 	for (chain = 0; chain < CHAINS; chain++)
@@ -1898,7 +1959,9 @@ static void drill_start_random(int key, struct mendicant_member *members, int co
 	}
 	choice = mendicant_drill_rand();
 	chain = found ? choices[choice % found] : -1;
-	chain_start(key, members, count, geometry, chain, (choice >> 8) & 1 ? 1 : -1, (int)((choice >> 9) & 1), time, FALSE);
+	tempo = (mendicant_config.preset == _mendicant_preset_aggressive) ? 1 :
+		(mendicant_config.preset == _mendicant_preset_defensive ? 0 : (int)((choice >> 9) & 1));
+	chain_start(key, members, count, geometry, chain, (choice >> 8) & 1 ? 1 : -1, tempo, time, FALSE);
 	plan_begin(key, members, count);
 }
 

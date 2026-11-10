@@ -641,6 +641,10 @@ void mendicant_aim_actor(
 		aim_original[slot].radius = radius;
 	}
 	factor = aim_factor(actor_index, actor);
+	if (mendicant_config.preset == _mendicant_preset_sharpshooter)
+		factor *= 0.78f;
+	else if (mendicant_config.preset == _mendicant_preset_aggressive)
+		factor *= 1.06f;
 	aim_original[slot].written_error = aim_original[slot].error * factor;
 	aim_original[slot].written_radius = aim_original[slot].radius * factor;
 	if (mendicant_config.aim_debug && aim_debug_lines < 40)
@@ -676,6 +680,8 @@ void mendicant_aim_actor(
 	/* Marines with an assault rifle fire longer bursts with shorter pauses:
 	sustained fire that keeps the enemy down */
 	marine_fire = combat_maximum(0.1f, mendicant_config.marine_fire);
+	if (mendicant_config.preset == _mendicant_preset_aggressive)
+		marine_fire *= 1.18f;
 	sustained = marine_fire != 1.0f && mendicant_side_of(actor->meta.team_index) == TEAM_HUMAN && unit &&
 		mendicant_carries_assault_rifle(unit);
 	for (bound = 0; bound < 2; bound++)

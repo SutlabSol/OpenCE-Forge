@@ -5974,7 +5974,7 @@ static int forge_point_in_sight(float x, float y, float z)
 
 void forge_3d_update(float dt)
 {
-	static int prev_f1, prev_f2, prev_f4, prev_f5, prev_f8, prev_esc, prev_x, prev_bk, prev_lmb;
+	static int prev_f1, prev_f2, prev_f4, prev_f5, prev_f8, prev_f9, prev_esc, prev_x, prev_bk, prev_lmb;
 	static int prev_up, prev_down, prev_left, prev_right, prev_enter, prev_g, prev_z, prev_f, prev_rot;
 	static int prev_copy, prev_look_settings;
 	static uint32_t s_del_hold_start_ms = 0;
@@ -5988,7 +5988,7 @@ void forge_3d_update(float dt)
 	static uint32_t s_last_stick_nav_ms = 0;
 	static int s_prev_modal = 0;
 	struct scenario *scen;
-	int cur_f1, cur_f2, cur_f4, cur_f5, cur_f8, cur_esc, cur_x, cur_bk, cur_lmb, cur_rot;
+	int cur_f1, cur_f2, cur_f4, cur_f5, cur_f8, cur_f9, cur_esc, cur_x, cur_bk, cur_lmb, cur_rot;
 	int cur_up, cur_down, cur_left, cur_right, cur_enter, cur_g, cur_z, cur_f, cur_del, cur_copy, cur_look_settings;
 	float gp_lx = 0.0f, gp_ly = 0.0f, gp_rx = 0.0f, gp_ry = 0.0f, gp_lt = 0.0f, gp_rt = 0.0f;
 
@@ -6296,6 +6296,7 @@ void forge_3d_update(float dt)
 	cur_f4 = forge_action_down(FORGE_BIND_THIRD_PERSON);
 	cur_f5 = forge_action_down(FORGE_BIND_QUICK_SAVE);
 	cur_f8 = (GetAsyncKeyState(0x77) & 0x8000) != 0; /* VK_F8 */
+	cur_f9 = (GetAsyncKeyState(0x78) & 0x8000) != 0; /* VK_F9 */
 	cur_esc = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
 	if (s_pointer_input.back && g_forge.active_modal != _forge_modal_save_copy_as)
 	{
@@ -6322,6 +6323,22 @@ void forge_3d_update(float dt)
 	{
 		forge_ui_theme_load(1);
 		forge_set_status("Reloaded Forge UI Theme");
+	}
+	/* Toggle 3D Navmesh & AI Tactical Debug Overlay with F9 */
+	if (cur_f9 && !prev_f9)
+	{
+		boolean on = halo_navmesh_toggle_debug_overlay();
+		if (on)
+		{
+			struct halo_navmesh_stats st;
+			halo_navmesh_get_stats(&st);
+			forge_set_status("Navmesh Overlay: ON (%ld BSP, %ld Forge, %ld Off-Mesh)",
+				st.bsp_polys, st.forge_polys, st.offmesh_links);
+		}
+		else
+		{
+			forge_set_status("Navmesh Overlay: OFF");
+		}
 	}
 
 	{
@@ -6536,6 +6553,7 @@ void forge_3d_update(float dt)
 	prev_f4 = cur_f4;
 	prev_f5 = cur_f5;
 	prev_f8 = cur_f8;
+	prev_f9 = cur_f9;
 	prev_esc = cur_esc;
 	prev_x = cur_x;
 
@@ -8359,6 +8377,11 @@ void forge_3d_dropship_routes_render(void (*draw_piece)(float const *from, float
 			}
 		}
 	}
+
+	if (halo_navmesh_get_debug_overlay())
+	{
+		halo_navmesh_debug_render_pieces(&render.camera.position, draw_piece);
+	}
 }
 
 static void draw_teleporter_and_objective_markers(
@@ -8377,6 +8400,54 @@ static void draw_teleporter_and_objective_markers(
 	 * In Spartan Play mode, hide Forge-only Spawn Point and Objective markers and labels completely! */
 	if (g_forge.mode != _forge_mode_3d_monitor)
 		return;
+
+	if (halo_navmesh_get_debug_overlay())
+	{
+		struct halo_navmesh_stats st;
+		char nav_hud[160];
+		short cx = (short)((window_x0 + window_x1) / 2);
+		long om_count, om_i;
+
+		halo_navmesh_get_stats(&st);
+		snprintf(nav_hud, sizeof(nav_hud),
+			"[F9] NAVMESH: %ld BSP | %ld FORGE | %ld BLOCKED | %ld OFF-MESH | %ld VEH | %ld PATHS",
+			st.bsp_polys, st.forge_polys, st.blocked_polys, st.offmesh_links, st.vehicle_polys, st.active_paths);
+		set_forge_hud_ui_scale(FORGE_IN_MATCH_HUD_SCALE, (float)cx, (float)(window_y0 + 22));
+		draw_ce_menu_str_box(0, font_index, (short)(cx - 280), (short)(window_y0 + 10), (short)(cx + 280), (short)(window_y0 + 34), 2,
+			nav_hud, 0xFF2896FFu);
+
+		om_count = halo_navmesh_get_offmesh_link(0, NULL, NULL, NULL);
+		for (om_i = 0; om_i < om_count && om_i < 64; om_i++)
+		{
+			real_point3d om_start, om_end;
+			short om_type = 0;
+			union real_point2d spt;
+			float dx, dy, dz;
+
+			halo_navmesh_get_offmesh_link(om_i, &om_start, &om_end, &om_type);
+			dx = om_start.x - render.camera.position.x;
+			dy = om_start.y - render.camera.position.y;
+			dz = om_start.z - render.camera.position.z;
+			if (dx * dx + dy * dy + dz * dz > 28.0f * 28.0f)
+				continue;
+			om_start.z += 0.25f;
+			if (render_camera_world_to_screen(&render.camera, &render.frustum, &om_start, &spt))
+			{
+				short sx = (short)(window_x0 + (short)(spt.x + 0.5f));
+				short sy = (short)(window_y0 + (short)(spt.y + 0.5f));
+				char const *om_lbl = (om_type == _halo_nav_offmesh_teleporter) ? "[TELEPORT]" :
+					(om_type == _halo_nav_offmesh_ladder ? "[LADDER]" : "[LEDGE DROP]");
+				uint32_t om_col = (om_type == _halo_nav_offmesh_teleporter) ? 0xFFE066FFu :
+					(om_type == _halo_nav_offmesh_ladder ? 0xFFFFC824u : 0xFFFF6868u);
+
+				if (sx >= window_x0 + 20 && sx <= window_x1 - 20 && sy >= window_y0 + 10 && sy <= window_y1 - 10)
+				{
+					set_forge_hud_ui_scale(FORGE_IN_MATCH_HUD_SCALE, (float)sx, (float)sy);
+					draw_ce_menu_str_box(0, font_index, (short)(sx - 70), (short)(sy - 8), (short)(sx + 70), (short)(sy + 16), 2, om_lbl, om_col);
+				}
+			}
+		}
+	}
 
 	/* Only show floating marker names when the pickup reticle is over the item (or holding it) */
 	for (i = 0; i < g_forge.live_instance_count; i++)

@@ -1106,6 +1106,14 @@ static const struct config_setting config_settings[] =
 		"How fast the Marines fire, against the stock game's 1.0." },
 	{ "ai.mendicant.command_radius", _config_real, "30.0", "HALO_AI_MENDICANT_COMMAND_RADIUS", _environment_value, _platform_all,
 		"How far from its leader, in world units, a soldier is still in its unit." },
+	{ "ai.mendicant.preset", _config_string, "\"adaptive\"", "HALO_AI_MENDICANT_PRESET", _environment_value, _platform_all,
+		"Tactical personality preset for Mendicant AI, Firefight squads, and\n"
+		"multiplayer bots: \"adaptive\", \"aggressive\", \"defensive\", \"flanking\",\n"
+		"or \"sharpshooter\"." },
+	{ "ai.navmesh.debug_overlay", _config_boolean, "false", "HALO_AI_NAVMESH_DEBUG", _environment_value, _platform_all,
+		"Render the 3D navigation mesh, Forge ramp/obstacle polygons, off-mesh\n"
+		"links, and active smoothed AI/bot paths in Forge Monitor Mode (also\n"
+		"toggled live with F9)." },
 	{ "ai.mendicant.training", _config_boolean, "false", "HALO_AI_MENDICANT_TRAINING", _environment_value, _platform_linux,
 		"Open the training bridge to brain.py (POSIX shared memory)." },
 	{ "ai.mendicant.training_skip", _config_integer, "7", "HALO_AI_MENDICANT_TRAINING_SKIP", _environment_value, _platform_linux,

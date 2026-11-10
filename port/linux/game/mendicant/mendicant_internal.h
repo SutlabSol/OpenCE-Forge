@@ -155,6 +155,7 @@ struct mendicant_config
 {
 	boolean enabled, training, discipline, targeting, individuals, aim_difficulty, aim_moving,
 		aim_debug, vehicle_test, models;
+	short preset;
 	long training_skip, seed;
 	real aim, marine_fire, command_radius, variety;
 	char bridge[256], weights[128], sample_log[256], drill_log[256], player_log[256], move_test_log[256];
