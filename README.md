@@ -2,7 +2,7 @@
 
 # OpenCE : Forge
 
-**Halo: Combat Evolved for Windows, Linux & Android — Full [OpenCE](https://github.com/OpenCommunityEdition/OpenCE) Port with Integrated 3D Forge Mode (`v2.10.1`)**
+**Halo: Combat Evolved for Windows, Linux & Android — Full [OpenCE](https://github.com/OpenCommunityEdition/OpenCE) Port with Integrated 3D Forge Mode (`v2.10.2`)**
 
 <p align="center">
   <img src="port/assets/icon/opence-icon.png" alt="OpenCE" width="128">
@@ -36,7 +36,7 @@
   - **FORGE:** Opens the dedicated Forge Hub (**Solo Forge**, **Multiplayer Forge**, **Edit Maps**, and **Tag Options**).
 - **Forging on Xbox, Custom Edition & MCC Multiplayer Maps:** Edit any retail Xbox multiplayer map, Halo Custom Edition multiplayer map (`custom_maps/`), or Halo 1 MCC multiplayer/Workshop map (`mcc_maps/`). *(Singleplayer campaign maps can be opened in the Tag Browser to extract custom tags, while map editing is restricted to multiplayer maps.)*
 - **Unified Faber Tag Vault (`.fbrtag` + `faber_vault.bin`):** Custom tags extracted from **Xbox**, **MCC**, and **Custom Edition** maps are stored in a single unified, content-addressed, deduplicated storage format (`tag_profiles/*.fbrtag` + `tag_profiles/faber_vault.bin`). Shared bitmaps and sound permutations across multiple custom tags are stored once in `faber_vault.bin` and paged on demand.
-- **Standalone `.map` Baking (`F5` / `Pause -> SAVE MAP..`):** Saving a forged map bakes all placed objects, spawns, objectives, weld prefabs, custom scripts, and imported custom tags directly into a self-contained `.map` file in `custom_maps/` so forged maps play natively in Standard Mode Multiplayer and Dedicated Servers without external tag files.
+- **Unified Sidecar Map Saving (`F5` / `Pause -> SAVE MAP..`):** Saving a forged map exports a lightweight `.txt` sidecar overlay in `custom_maps/` storing all placed objects, spawns, objectives, weld groups, light overrides, AI encounters, and custom tag references so forged maps play natively in both Forge and Standard Mode Multiplayer and Dedicated Servers without duplicating large `.map` files.
 
 > [!IMPORTANT]
 > **No proprietary game maps or copyrighted assets are included in this repository or its releases.** You must provide your own Halo: Combat Evolved `maps/` (or Xbox `.iso` / `.xiso` disc image), optional Halo Custom Edition `custom_maps/` (`bitmaps.map`, `sounds.map`, `loc.map`), and optional MCC `mcc_maps/`.
@@ -67,41 +67,33 @@ Navigating to **`MULTIPLAYER -> FORGE`** opens the Forge Hub:
 ## In-Game Forge Features
 
 ### 1. 3D Monitor Mode (`F1`) & Precision Manipulation
-- **Instant Spartan ↔ Monitor Toggle (`F1` / D-Pad Up):** Seamless transition between playing as a Spartan and flying as 343 Guilty Spark Monitor with collision-free noclip movement (`F4`) and adjustable fly speed (`Alt`).
-- **Raycast Grabbing & Push/Pull Distance:** Grab, move, and place objects within **20m**; use the **Mouse Wheel** (or Gamepad triggers) to push/pull held objects smoothly between **1m and 30m**.
-- **3-Axis Gimbal Rotation & Snapping:** Hold **`R`** + Mouse (or `RT` on controller) and press **`Q` / `E`** to cycle **Yaw**, **Pitch**, and **Roll** axes with live 3D protractors. Press **`G`** to cycle rotation snap increments (`Off -> 5° -> 15° -> 45° -> 90°`), hold **`Z`** to snap to the floor, or hold **`F`** to align to any surface normal.
+- **Instant Spartan ↔ Monitor Toggle (`F1` / D-Pad Up):** Seamless transition between playing as a Spartan and flying as 343 Guilty Spark Monitor with 1st/3rd-person view toggle (`F4`) and adjustable fly speed (`Shift`).
+- **Line-of-Sight Raycast Selection & Push/Pull Distance:** Accurately select, grab, move, and place visible objects within **20m** (never through walls); use the **Mouse Wheel** (or `Page Up` / `Page Down`) to push/pull held objects smoothly between **1m and 30m**.
+- **Hover or Hold Object Properties (`X`):** Open **Object Properties (`X`)** either while holding an object or simply while facing/hovering an object (so you can edit weld groups, physics modes, or light settings without disturbing placement).
+- **3-Axis Gimbal Rotation & Snapping:** Hold **`R`** + Mouse (or `LT` on controller) to rotate Yaw and Pitch (`Q` / `E` rolls when holding `R`). Press **`G`** to cycle rotation snap increments (`Off -> 15° -> 45° -> 90°`), hold **`Z`** to snap to the floor, or hold **`F`** to snap to any surface.
 
 ### 2. Tabbed Object Palette (`F2`) & Live 3D Previews
-- Spawn **Vehicles**, **Weapons**, **Equipment**, **Scenery**, **Bipeds / AI**, **Devices / Doors / Machines**, **Dynamic Lights & Emitters**, **Gametype Objectives & Spawns**, **Weld Prefabs (`[W]`)**, and **Custom (`[C]`) Tags** with an interactive 3D preview window.
+- Spawn **Weapons**, **Equipment**, **Vehicles**, **Scenery**, **Doors / Barriers**, **Lights**, **Spawns & Objectives**, **Bipeds / AI**, and **Custom (`[C]`) Tags** with an interactive 3D preview window.
 - **Playable Multiplayer Covenant Wraith:** Includes an indestructible, multiplayer-ready Covenant Wraith in the Vehicles menu with a functional parabolic plasma mortar and wing-mounted plasma cannons.
 
-### 3. Weld Prefabs (`[W]`) & Multi-Part Group Welding (`V`)
-- **Multi-Part Welding (`V`):** Link up to **64 objects** into a rigid weld group (`Group 1..16`). Grabbing, rotating, duplicating (`C`), or deleting any member manipulates the entire welded assembly while preserving exact relative local-space transforms.
-- **Save as Reusable `[W]` Prefab:** Open **Object Properties (`X`) -> Weld & Group Options -> Save Weld as Prefab** to enter a custom name and save the assembly to `tag_profiles/weld_prefabs/<name>.fbrweld`. Saved prefabs appear under the **Prefabs** category of the `F2` Object Palette on every map and automatically bundle any custom `[C]` tag dependencies.
+### 3. Multi-Part Group Welding (`Ctrl+G` / `X -> WELD GROUP`)
+- **Multi-Part Welding (`Ctrl+G`):** Link up to **64 objects** into a rigid weld group (`GROUP 1..16`, cycle active group with `Shift+Ctrl+G` or assign directly via `X -> WELD GROUP` while facing or holding an item).
+- Grabbing, rotating (`R`), duplicating (`C`), or deleting any member manipulates the entire welded assembly while preserving exact relative local-space transforms.
 
-### 4. Uniform & Non-Uniform (`X / Y / Z`) Object Scaling
-- Scale any placed Scenery, Vehicle, Weapon, Equipment, or Device either **Uniformly** or independently along **Scale X**, **Scale Y**, and **Scale Z** (`0.10x` to `10.0x`) via **Object Properties (`X`)**.
-- Both the hardware vertex pipeline and 3D raycast/swept-sphere collision queries scale dynamically to match the object's visual bounds.
+### 4. Dynamic Runtime Lights (`F2 -> LIGHTS`)
+- Spawn light fixtures and emitters from **`F2 -> LIGHTS`** and customize **LIGHT COLOR** (`DEFAULT`, `WHITE`, `RED`, `BLUE`, `GREEN`, `AMBER`, `PURPLE`, `CYAN`), **INTENSITY** (`100%`, `25%`, `50%`, `150%`, `200%`, `300%`), and **LIGHT RADIUS** (`DEFAULT`, `2U`, `4U`, `8U`, `12U`, `20U`) via **Object Properties (`X`)**.
 
-### 5. Dynamic Runtime Point Lights & Surface Emissive Overrides
-- Spawn **`[L] Dynamic Light`** markers (`F2 -> Lighting`) and customize **Color Preset** (12 RGB presets), **Light Radius** (`1m–50m`), **Intensity** (`0.10–10.0`), and **Animation Mode** (`Steady`, `Slow Pulse`, `Fast Strobe`, `Plasma Flicker`, `Hazard Beacon`).
-- Override **Surface Emissive Color & Power** on any placed 3D object so dark metallic or concrete scenery can glow without modifying shader tags on disk.
-
-### 6. Biped AI Spawning & Automated BSP Nav-Graph Pathfinding
+### 5. Biped AI Spawning & Automated BSP Nav-Graph Pathfinding
 - Spawn Campaign AI bipeds (`Marines`, `Crewmen`, `Elites`, `Grunts`, `Jackals`, `Hunters`, `Flood Combat/Carrier/Infection`, `Sentinels`, `Monitor`) on any multiplayer map.
-- Configure **AI Team / Allegiance**, **Primary Weapon Loadout**, **Respawn Timer**, **Move Speed**, **Sight Range**, and **Patrol Radius** via **`X` (Object Properties)**.
+- Configure **TEAM** (`FRIENDLY`, `COVENANT`, `FLOOD`, `SENTINEL`), **RESPAWN** timer (`NEVER`, `5–60 SEC`), and **AI ORDER** (`DEFAULT`, `GUARD POS`, `PATROL`, `CHARGE`, `ENTER VEHICLE`) via **`X` (Object Properties)**.
 - Forge automatically builds an in-memory **BSP Walkable Surface Navigation Graph** (up to 4,096 walkable floor triangles and 24,576 adjacency edges) so AI navigate around walls, up ramps, and across bridges to pursue targets.
 
-### 7. In-Game Custom Script Editor (`F6`) & Live HS Trigger Runtime
-- Press **`F6`** in Monitor Mode to open the full-screen **Forge Custom Script Editor** with HaloScript syntax highlighting, line numbers, clipboard copy/paste (`Ctrl+C` / `Ctrl+V`), template insertion (`F2`), and one-key compilation (`F5`).
-- Supports `(script startup ...)`, `(script continuous ...)`, `(script dormant ...)`, `(wake ...)`, `(sleep ...)`, `(if ...)`, `(begin ...)`, `(sv_say ...)`, `(object_create_anew ...)`, `(object_destroy ...)`, `(object_teleport ...)`, `(unit_kill ...)`, and `(device_set_power ...)` with full multiplayer synchronization and `.map` persistence.
+### 6. Gametype Objectives, Teleporters & 3D Boundary Markers
+- Existing and newly placed **Player Spawns**, **CTF Flags**, **Oddball Spawns**, **King of the Hill Zones** (with live 3D boundary rings), **Race Track Points**, and **Teleporters** render as 3D markers in Monitor Mode and can be moved, rotated, or configured in real time.
 
-### 8. Gametype Objectives, Teleporters & 3D Boundary Markers
-- Existing and newly placed **Player Spawns**, **CTF Flags**, **Oddball Spawns**, **King of the Hill Zones** (with live 3D boundary beams), **Race Track Points**, and **Teleporters** (`Two-Way`, `Sender Only`, `Receiver Only` on `Channel 1–26`, with optional vehicle pass-through) render as translucent 3D markers in Monitor Mode and can be moved, rotated, or configured in real time.
-
-### 9. In-Session Peer-to-Peer Custom Tag Streaming
-- When a host spawns a custom `[C]` tag or `[W]` weld prefab that a connected client does not have installed, Forge automatically streams the compressed tag bundle over the reliable distributed channel (`0xF0..0xF3`) with a live HUD progress bar (`STREAMING CUSTOM TAG: XX%`).
-- Streamed tags install into a sandboxed **session-ephemeral RAM slot** (`128 MB` session cap, zero disk writes during gameplay) and are only committed to the client's local Faber Tag Vault if the client explicitly saves the Forge map (`F5` / `Pause -> Save Map`).
+### 7. In-Session Peer-to-Peer Custom Tag Streaming
+- When a host spawns a custom `[C]` tag that a connected client does not have installed, Forge automatically streams the compressed tag bundle over the reliable distributed channel with a live HUD progress bar and BLAKE2b-256 verification.
+- Streamed tags install into a sandboxed **session-ephemeral RAM slot** (`24 MB` session cap, zero disk writes during gameplay) and are only committed to the client's local Faber Tag Vault if the client explicitly saves the Forge map (`F5` / `Pause -> Save Map`).
 
 ---
 
@@ -128,21 +120,20 @@ All Forge keyboard/mouse and controller bindings can be customized in-game under
 | Key / Input | Controller Default | Action |
 | :--- | :--- | :--- |
 | **`F1`** | **D-Pad Up** | Switch Play (Spartan) / Edit (3D Monitor) Mode |
-| **`F2`** | **X** | Open / Close Inventory (Forge Object Palette) |
-| **`X`** | **X** *(while holding/hovering item)* | Open Object Properties (Team, Scale, Physics, Weld, AI, Lighting) |
+| **`F2`** | **X** *(when not targeting item)* | Open / Close Inventory (Forge Object Palette) |
+| **`X`** | **X** *(while holding or facing item)* | Open Object Properties (Physics, Respawn, Weld Group, AI, Lighting) |
 | **`Left Click`** | **A** | Grab / Drop Object |
-| **`Mouse Wheel`** | **LT / RT** *(while grabbing)* | Push / Pull Held Object (`1m` – `30m`) |
-| **`Delete` / `Backspace`** | **Y** | Delete Hovered / Held Object |
-| **`Hold R` + Mouse** | **Hold Right Trigger (RT)** | Rotate Selected Object (`Q` / `E` cycles Yaw, Pitch, Roll on KB/M) |
-| **`V`** | **Object Properties -> Weld** | Toggle Weld Membership in Active Weld Group (`1..16`) |
-| **`C`** | **D-Pad Right** | Duplicate Hovered / Held Object (or entire Weld Group) |
-| **`G`** | **Left Thumb (LS)** | Cycle Rotation Snap (`Off`, `5°`, `15°`, `45°`, `90°`) |
-| **`Hold Z`** | **D-Pad Left** | Live-snap held object to floor |
-| **`Hold F`** | **Right Thumb (RS)** | Align held object to surface normal |
-| **`F3`** | **Back** | Toggle 1st-Person / 3rd-Person View |
-| **`F4`** | **—** | Toggle Monitor Noclip |
-| **`F5`** | **D-Pad Down** | Quick Save Forge Map (bakes standalone `.map` in `custom_maps/`) |
-| **`F6`** | **—** | Open In-Game Custom HaloScript (`HS`) Editor |
+| **`Mouse Wheel`** | **`Page Up` / `Page Down`** | Push / Pull Held Object (`1m` – `30m`) |
+| **`Delete` / `Backspace`** | **Y** | Delete Hovered / Held Object (or Weld Group) |
+| **`Hold R` + Mouse** | **Hold Left Trigger (LT) + RS** | Rotate Held / Hovered Object (`Q` / `E` rolls while holding `R`) |
+| **`Ctrl+G`** | **Object Properties -> Weld Group** | Toggle Weld Membership in Active Weld Group (`1..16`; `Shift+Ctrl+G` cycles group) |
+| **`C`** | **D-Pad Right** | Duplicate Hovered Object (or entire Weld Group) |
+| **`G`** | **Right Thumb (RS)** | Cycle Rotation Snap (`Off`, `15°`, `45°`, `90°`) |
+| **`Hold Z`** | **D-Pad Left** | Snap held object to floor |
+| **`Hold F`** | **—** | Snap held object to surface |
+| **`F4`** | **Back** | Toggle 1st-Person / 3rd-Person Monitor View |
+| **`F5`** | **D-Pad Down** | Quick Save Forge Map (`custom_maps/<name>.txt`) |
+| **`Ctrl+Z` / `Ctrl+Y`** | **—** | Undo / Redo Forge Action |
 
 ---
 
