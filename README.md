@@ -36,7 +36,7 @@
   - **FORGE:** Opens the dedicated Forge Hub (**Solo Forge**, **Multiplayer Forge**, **Edit Maps**, and **Tag Options**).
 - **Forging on Xbox, Custom Edition & MCC Multiplayer Maps:** Edit any retail Xbox multiplayer map, Halo Custom Edition multiplayer map (`custom_maps/`), or Halo 1 MCC multiplayer/Workshop map (`mcc_maps/`). *(Singleplayer campaign maps can be opened in the Tag Browser to extract custom tags, while map editing is restricted to multiplayer maps.)*
 - **Unified Faber Tag Vault (`.fbrtag` + `faber_vault.bin`):** Custom tags extracted from **Xbox**, **MCC**, and **Custom Edition** maps are stored in a single unified, content-addressed, deduplicated storage format (`tag_profiles/*.fbrtag` + `tag_profiles/faber_vault.bin`). Shared bitmaps and sound permutations across multiple custom tags are stored once in `faber_vault.bin` and paged on demand.
-- **Unified Sidecar Map Saving (`F5` / `Pause -> SAVE MAP..`):** Saving a forged map exports a lightweight `.txt` sidecar overlay in `custom_maps/` storing all placed objects, spawns, objectives, weld groups, light overrides, placed AI bipeds, and custom tag references so forged maps play natively in both Forge and Standard Mode Multiplayer and Dedicated Servers without duplicating large `.map` files.
+- **Unified Sidecar Map Saving (`F5` / `Pause -> SAVE MAP..`):** Saving a forged map exports a lightweight `.txt` sidecar overlay in `custom_maps/` storing all placed objects, spawns, objectives, weld groups, light overrides, and custom tag references so forged maps play natively in both Forge and Standard Mode Multiplayer and Dedicated Servers without duplicating large `.map` files.
 
 > [!IMPORTANT]
 > **No proprietary game maps or copyrighted assets are included in this repository or its releases.** You must provide your own Halo: Combat Evolved `maps/` (or Xbox `.iso` / `.xiso` disc image), optional Halo Custom Edition `custom_maps/` (`bitmaps.map`, `sounds.map`, `loc.map`), and optional MCC `mcc_maps/`.
@@ -73,7 +73,7 @@ Navigating to **`MULTIPLAYER -> FORGE`** opens the Forge Hub:
 - **3-Axis Gimbal Rotation & Snapping:** Hold **`R`** + Mouse (or `LT` on controller) to rotate Yaw and Pitch (`Q` / `E` rolls when holding `R`). Press **`G`** to cycle rotation snap increments (`Off -> 15° -> 45° -> 90°`), hold **`Z`** to snap to the floor, or hold **`F`** to snap to any surface.
 
 ### 2. Tabbed Object Palette (`F2`) & Live 3D Previews
-- Spawn **Weapons**, **Equipment**, **Vehicles**, **Scenery**, **Doors / Barriers**, **Lights**, **Spawns & Objectives**, **Bipeds / AI**, and **Custom (`[C]`) Tags** with an interactive 3D preview window.
+- Spawn **Weapons**, **Equipment**, **Vehicles**, **Scenery**, **Doors / Barriers**, **Lights**, **Spawns & Objectives**, and **Custom (`[C]`) Tags** with an interactive 3D preview window.
 - **Playable Multiplayer Covenant Wraith:** Includes an indestructible, multiplayer-ready Covenant Wraith in the Vehicles menu with a functional parabolic plasma mortar and wing-mounted plasma cannons.
 
 ### 3. Multi-Part Group Welding (`Ctrl+G` / `X -> WELD GROUP`)
@@ -83,15 +83,10 @@ Navigating to **`MULTIPLAYER -> FORGE`** opens the Forge Hub:
 ### 4. Dynamic Runtime Lights (`F2 -> LIGHTS`)
 - Spawn light fixtures and emitters from **`F2 -> LIGHTS`** and customize **LIGHT COLOR** (`DEFAULT`, `WHITE`, `RED`, `BLUE`, `GREEN`, `AMBER`, `PURPLE`, `CYAN`), **INTENSITY** (`100%`, `25%`, `50%`, `150%`, `200%`, `300%`), and **LIGHT RADIUS** (`DEFAULT`, `2U`, `4U`, `8U`, `12U`, `20U`) via **Object Properties (`X`)**.
 
-### 5. Biped AI Spawning & Automated BSP Nav-Graph Pathfinding
-- Spawn Campaign AI bipeds (`Marines`, `Crewmen`, `Elites`, `Grunts`, `Jackals`, `Hunters`, `Flood Combat/Carrier/Infection`, `Sentinels`, `Monitor`) on any multiplayer map.
-- Configure **TEAM** (`FRIENDLY`, `COVENANT`, `FLOOD`, `SENTINEL`), **RESPAWN** timer (`NEVER`, `5–60 SEC`), and **AI ORDER** (`DEFAULT`, `GUARD POS`, `PATROL`, `CHARGE`, `ENTER VEHICLE`) via **`X` (Object Properties)**.
-- Forge automatically builds an in-memory **BSP Walkable Surface Navigation Graph** (up to 4,096 walkable floor triangles and 24,576 adjacency edges) so AI navigate around walls, up ramps, and across bridges to pursue targets.
-
-### 6. Gametype Objectives, Teleporters & 3D Boundary Markers
+### 5. Gametype Objectives, Teleporters & 3D Boundary Markers
 - Existing and newly placed **Player Spawns**, **CTF Flags**, **Oddball Spawns**, **King of the Hill Zones** (with live 3D boundary rings), **Race Track Points**, and **Teleporters** render as 3D markers in Monitor Mode and can be moved, rotated, or configured in real time.
 
-### 7. In-Session Peer-to-Peer Custom Tag Streaming
+### 6. In-Session Peer-to-Peer Custom Tag Streaming
 - When a host spawns a custom `[C]` tag that a connected client does not have installed, Forge automatically streams the compressed tag bundle over the reliable distributed channel with a live HUD progress bar and BLAKE2b-256 verification.
 - Streamed tags install into a sandboxed **session-ephemeral RAM slot** (`24 MB` session cap, zero disk writes during gameplay) and are only committed to the client's local Faber Tag Vault if the client explicitly saves the Forge map (`F5` / `Pause -> Save Map`).
 
@@ -101,7 +96,7 @@ Navigating to **`MULTIPLAYER -> FORGE`** opens the Forge Hub:
 
 | Platform | Release Download | Debug Download |
 | :--- | :--- | :--- |
-| **Windows (x86)** | [**OpenCE-Forge-v2.10.0-windows-x86.zip**](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/OpenCE-Forge-v2.10.0-windows-x86.zip) / [halo-windows-release.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-windows-release.zip) | [halo-windows-debug.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-windows-debug.zip) |
+| **Windows (x86)** | [**OpenCE-Forge-v2.10.2-windows-x86.zip**](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/OpenCE-Forge-v2.10.2-windows-x86.zip) / [halo-windows-release.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-windows-release.zip) | [halo-windows-debug.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-windows-debug.zip) |
 | **Linux (x86)** | [halo-linux-release.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-linux-release.zip) | [halo-linux-debug.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-linux-debug.zip) |
 | **Android (ARM64)** | [halo-android-release.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-android-release.zip) | [halo-android-debug.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-android-debug.zip) |
 
@@ -121,7 +116,7 @@ All Forge keyboard/mouse and controller bindings can be customized in-game under
 | :--- | :--- | :--- |
 | **`F1`** | **D-Pad Up** | Switch Play (Spartan) / Edit (3D Monitor) Mode |
 | **`F2`** | **X** *(when not targeting item)* | Open / Close Inventory (Forge Object Palette) |
-| **`X`** | **X** *(while holding or facing item)* | Open Object Properties (Physics, Respawn, Weld Group, AI, Lighting) |
+| **`X`** | **X** *(while holding or facing item)* | Open Object Properties (Physics, Respawn, Weld Group, Lighting) |
 | **`Left Click`** | **A** | Grab / Drop Object |
 | **`Mouse Wheel`** | **`Page Up` / `Page Down`** | Push / Pull Held Object (`1m` – `30m`) |
 | **`Delete` / `Backspace`** | **Y** | Delete Hovered / Held Object (or Weld Group) |
