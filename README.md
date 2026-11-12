@@ -14,11 +14,12 @@
 
 [**Download Latest Release**](https://github.com/SutlabSol/OpenCE-Forge/releases/latest) ·
 [Overview](#overview--unified-opence-integration) ·
-[Forge Menu & Unified Tag Vault](#forge-menu--unified-tag-vault) ·
-[In-Game Forge Features](#in-game-forge-features) ·
-[Installation](#installation) ·
+[Architecture](#architecture-overview) ·
+[Forge Menu & Tag Vault](#forge-menu--unified-tag-vault) ·
+[In-Game Features](#in-game-forge-features) ·
+[Security & Zero-Trust Streaming](#security-architecture--zero-trust-custom-tag-streaming-ftrq--ftst) ·
 [Controls](#controls-in-forge) ·
-[Building from Source](#building-from-source)
+[Building](#building-from-source)
 
 </div>
 
@@ -39,7 +40,47 @@
 - **Unified Sidecar Map Saving (`F5` / `Pause -> SAVE MAP..`):** Saving a forged map exports a lightweight `.txt` sidecar overlay in `custom_maps/` storing all placed objects, spawns, objectives, weld groups, light overrides, and custom tag references so forged maps play natively in both Forge and Standard Mode Multiplayer and Dedicated Servers without duplicating large `.map` files.
 
 > [!IMPORTANT]
+> **Network Protocol & Stock Session Isolation:** Standard (non-Forge) multiplayer sessions continue to advertise and validate OpenCE's stock `HALO_PORT_NETWORK_VERSION` via [`forge_get_network_version`](port/linux/game/forge_runtime_tags.c), while active Forge sessions use `FORGE_NETWORK_VERSION` (`0x462A`) and `FORGE_GAME_KIND` (`0x46`) in [`forge_engine.h`](port/linux/game/forge_engine.h). Stock OpenCE clients and servers remain 100% compatible with non-Forge games.
+
+> [!NOTE]
 > **No proprietary game maps or copyrighted assets are included in this repository or its releases.** You must provide your own Halo: Combat Evolved `maps/` (or Xbox `.iso` / `.xiso` disc image), optional Halo Custom Edition `custom_maps/` (`bitmaps.map`, `sounds.map`, `loc.map`), and optional MCC `mcc_maps/`.
+
+---
+
+## Architecture Overview
+
+```mermaid
+flowchart LR
+    subgraph Sources["Map & Tag Donor Sources"]
+        XBOX["Xbox Retail (v5)"]
+        CE["Custom Edition (v609)"]
+        MCC["MCC CEA / Workshop (v13)"]
+    end
+
+    subgraph Vault["Unified Faber Tag Vault & Runtime Loader"]
+        FBRTAG["Unified .fbrtag + faber_vault.bin\n(Content-Addressed Deduplicated Regions)"]
+        PREVIEW["3D Tag Previewer\n(Live Orbiting Mesh + Textures)"]
+    end
+
+    subgraph Network["Zero-Trust Multiplayer Sync"]
+        STREAM["Solicited Reliable Tag Stream\n(FTRQ 107 / FTST 108 + BLAKE2b-256)"]
+        RAM["Ephemeral Session RAM\n(24 MB Cap, 0 Disk Writes on Join)"]
+    end
+
+    subgraph Storage["Unified Sidecar-Overlay Saves"]
+        SIDECAR["custom_maps/<name>.txt\n(Base Map Reference + Live State)"]
+        COMMIT["On-Save Tag Persistence\n(Commits Session [C] Tags to Vault)"]
+    end
+
+    XBOX --> FBRTAG
+    MCC --> FBRTAG
+    CE --> FBRTAG
+    FBRTAG --> PREVIEW
+    FBRTAG --> STREAM
+    STREAM --> RAM
+    RAM -->|"Joiner clicks SAVE MAP AS"| COMMIT
+    COMMIT --> SIDECAR
+```
 
 ---
 
@@ -89,6 +130,30 @@ Navigating to **`MULTIPLAYER -> FORGE`** opens the Forge Hub:
 ### 6. In-Session Peer-to-Peer Custom Tag Streaming
 - When a host spawns a custom `[C]` tag that a connected client does not have installed, Forge automatically streams the compressed tag bundle over the reliable distributed channel with a live HUD progress bar and BLAKE2b-256 verification.
 - Streamed tags install into a sandboxed **session-ephemeral RAM slot** (`24 MB` session cap, zero disk writes during gameplay) and are only committed to the client's local Faber Tag Vault if the client explicitly saves the Forge map (`F5` / `Pause -> Save Map`).
+
+---
+
+## Security Architecture & Zero-Trust Custom Tag Streaming (`FTRQ` / `FTST`)
+
+When a client joins a Forge server whose map uses custom `[C]` tags not yet in the joiner's vault, the client streams those tags from the host under a strict **zero-trust security model** ([`forge_network.c`](port/linux/game/forge_network.c), [`forge_runtime_tags.c`](port/linux/game/forge_runtime_tags.c)):
+
+| Security Control | Enforcement Mechanism |
+| :--- | :--- |
+| **User Opt-Out Setting** | Gated by `network.forge_tag_download` (`HALO_FORGE_TAG_DOWNLOAD`, default `true`) in [`port_config.c`](port/linux/src/port_config.c). When disabled, clients never request or accept tag streams and render lightweight 3D proxy markers instead. |
+| **Reliable-Stream Admission Only** | [`forge_tag_stream_handle_message`](port/linux/game/forge_network.c) rejects any packet where `from_stream == FALSE`, preventing unauthenticated UDP datagram spoofing or injection. |
+| **Solicited Single-Flight Transfer Tokens** | Clients only accept `OFFER` and `CHUNK` packets matching the currently solicited `hash` and a randomized 32-bit `transfer_id` token (`g_client_tag_rx.transfer_id`). Unsolicited offers or mismatched tokens are rejected immediately. |
+| **Strict Tag Group & Path Allowlisting** | Only placeable object root groups (`scen`, `vehi`, `weap`, `eqip`, `mach`, `lifi`, `ctrl`, `bipd`) are permitted. Rejects non-ASCII characters, drive letters (`:`), leading/trailing/double slashes, and `..` path traversal sequences, and verifies `FNV-1a(group, tag_path) == expected_hash` against bait-and-switch offers. |
+| **Cryptographic BLAKE2b-256 Pre-Parse Verification** | All chunks are reassembled with duplicate/out-of-bounds bitmap tracking (`chunk_seen[]`), inflated with exact size verification (`forge_zlib_uncompress_exact`), and verified in constant time against the offer's **BLAKE2b-256** digest **before** any tag or bundle parser ever touches the payload. |
+| **Base-Map Anti-Shadowing** | [`forge_install_ephemeral_tag_bundle`](port/linux/game/forge_runtime_tags.c) refuses to install any streamed tag whose `(group, path)` matches a tag already present in the base map (`abs_index < forge_get_base_map_tag_count()`), preventing a malicious host from overriding stock game assets. |
+| **Bounded Session RAM & Strike Cutoff** | Enforces per-bundle caps (`<= 8 MB` compressed, `<= 14 MB` uncompressed), a `24 MB` per-session RAM cap (`FORGE_TAG_STREAM_MAX_SESSION_BYTES`), a 32-tag session limit, and a **3-strike host cutoff** (`FORGE_TAG_STREAM_MAX_STRIKES = 3`) that halts all tag streaming from a misbehaving peer. |
+| **Backlog & Rate Pacing** | Host transmission in [`forge_tag_stream_tick`](port/linux/game/forge_network.c) is gated by per-client `reliable_outgoing_queue` backlog (`<= 16 KB`) and a `128 KB/s` wall-clock token bucket so high-FPS hosts never starve gameplay traffic or overflow the 256 KB reliable queue. |
+| **Zero Disk Writes Unless Explicitly Saved by Joiner** | Streamed tags live exclusively in session RAM (`source_cache_id = 4`) and are wiped on map unload unless the joiner explicitly chooses `SAVE MAP AS` (or `F5`). When the joiner saves the map, [`forge_commit_session_ephemeral_tags_to_disk`](port/linux/game/forge_runtime_tags.c) persists the already-verified session bundles into the unified Faber Tag Vault (`.fbrtag` + `faber_vault.bin`) so the saved Forge map works offline on future boots. |
+
+---
+
+## Dedicated Server Support
+
+- Dedicated server rotation `<map>:forge` entry ([`docs/dedicated_server.md`](docs/dedicated_server.md)) and flags `--forge-map <map>` and `--forge-autosave` ([`server_mode.c`](port/linux/src/server_mode.c), [`forge_server_autosave_tick`](port/linux/game/forge_runtime_tags.c)) flush a lightweight `.txt` sidecar 5 seconds after edits and commit full state when the last player leaves or via `!FW`.
 
 ---
 
