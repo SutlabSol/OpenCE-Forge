@@ -304,6 +304,22 @@ static int translate_elsewhere(const char *cursor, char *resolved, unsigned long
 	return 0;
 }
 
+static int starts_with_host_root(const char *path, const char *root)
+{
+	unsigned long index;
+
+	if (!path || !root || !root[0] || !strcmp(root, "."))
+		return 0;
+	for (index = 0; root[index]; index++)
+	{
+		char a = (path[index] == '\\') ? '/' : path[index];
+		char b = (root[index] == '\\') ? '/' : root[index];
+		if (tolower((unsigned char)a) != tolower((unsigned char)b))
+			return 0;
+	}
+	return !path[index] || path[index] == '/' || path[index] == '\\';
+}
+
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size)
 {
 	char resolved[1024];
@@ -311,7 +327,21 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 	unsigned long length;
 
 	snprintf(resolved, sizeof(resolved), "%s", platform_data_root());
-	if (((cursor[0] >= 'a' && cursor[0] <= 'z') || (cursor[0] >= 'A' && cursor[0] <= 'Z')) && cursor[1] == ':')
+	if (starts_with_host_root(cursor, platform_data_root()))
+	{
+		cursor += strlen(platform_data_root());
+	}
+	else if (starts_with_host_root(cursor, platform_save_root()))
+	{
+		snprintf(resolved, sizeof(resolved), "%s", platform_save_root());
+		cursor += strlen(platform_save_root());
+	}
+	else if (starts_with_host_root(cursor, platform_custom_edition_root()))
+	{
+		snprintf(resolved, sizeof(resolved), "%s", platform_custom_edition_root());
+		cursor += strlen(platform_custom_edition_root());
+	}
+	else if (((cursor[0] >= 'a' && cursor[0] <= 'z') || (cursor[0] >= 'A' && cursor[0] <= 'Z')) && cursor[1] == ':')
 	{
 		char drive = (char)(cursor[0] | 0x20);
 
@@ -323,7 +353,7 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 		{
 			cursor -= 2;
 		}
-		else if (drive != 'd')
+		else if (drive == 'z' || drive == 't' || drive == 'u' || drive == 'x' || drive == 'y')
 		{
 			struct posix_file_information information;
 
@@ -332,6 +362,21 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 			if (posix_stat(resolved, &information) != 0)
 				posix_make_directory(resolved);
 		}
+#ifdef _WIN32
+		else if (drive != 'd')
+		{
+			snprintf(resolved, sizeof(resolved), "%c:", cursor[0]);
+		}
+#else
+		else if (drive != 'd')
+		{
+			struct posix_file_information information;
+
+			snprintf(resolved, sizeof(resolved), "%s/%c", platform_save_root(), drive);
+			if (posix_stat(resolved, &information) != 0)
+				posix_make_directory(resolved);
+		}
+#endif
 		cursor += 2;
 	}
 	else

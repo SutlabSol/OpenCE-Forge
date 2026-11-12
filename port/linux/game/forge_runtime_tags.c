@@ -93,6 +93,10 @@ static int forge_float_is_finite(float x)
 
 static void forge_resolve_host_path(char const *path, char *out_host_path, size_t out_sz);
 
+#undef fopen
+#undef remove
+#undef rename
+
 void *forge_host_fopen(char const *path, char const *mode)
 {
 	char host_path[1024];

@@ -2,17 +2,17 @@
 
 # OpenCE : Forge
 
-**Halo: Combat Evolved for Windows, Linux & Android — Full [OpenCE](https://github.com/OpenCommunityEdition/OpenCE) Port with Integrated 3D Forge Mode (`v2.10.2`)**
+**Halo: Combat Evolved for Windows, Linux & Android — Full [OpenCE](https://github.com/OpenCommunityEdition/OpenCE) Port with Integrated 3D Forge Mode (`v2.10.3`)**
 
 <p align="center">
   <img src="port/assets/icon/opence-icon.png" alt="OpenCE" width="128">
 </p>
 
-[![Latest Release](https://img.shields.io/github/v/release/SutlabSol/HaloOpenCE-Forge?label=Download%20Release&style=for-the-badge&color=2ea44f)](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest)
+[![Latest Release](https://img.shields.io/github/v/release/SutlabSol/OpenCE-Forge?label=Download%20Release&style=for-the-badge&color=2ea44f)](https://github.com/SutlabSol/OpenCE-Forge/releases/latest)
 [![Upstream OpenCE](https://img.shields.io/badge/Upstream-OpenCommunityEdition%2FOpenCE-0078D6?style=for-the-badge)](https://github.com/OpenCommunityEdition/OpenCE)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL--3.0--or--later-blue?style=for-the-badge)](LICENSE)
 
-[**Download Latest Release**](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest) ·
+[**Download Latest Release**](https://github.com/SutlabSol/OpenCE-Forge/releases/latest) ·
 [Overview](#overview--unified-opence-integration) ·
 [Forge Menu & Unified Tag Vault](#forge-menu--unified-tag-vault) ·
 [In-Game Forge Features](#in-game-forge-features) ·
@@ -96,12 +96,12 @@ Navigating to **`MULTIPLAYER -> FORGE`** opens the Forge Hub:
 
 | Platform | Release Download | Debug Download |
 | :--- | :--- | :--- |
-| **Windows (x86)** | [**OpenCE-Forge-v2.10.2-windows-x86.zip**](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/OpenCE-Forge-v2.10.2-windows-x86.zip) / [halo-windows-release.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-windows-release.zip) | [halo-windows-debug.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-windows-debug.zip) |
-| **Linux (x86)** | [halo-linux-release.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-linux-release.zip) | [halo-linux-debug.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-linux-debug.zip) |
-| **Android (ARM64)** | [halo-android-release.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-android-release.zip) | [halo-android-debug.zip](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest/download/halo-android-debug.zip) |
+| **Windows (x86)** | [**OpenCE-Forge-v2.10.3-windows-x86.zip**](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/OpenCE-Forge-v2.10.3-windows-x86.zip) / [halo-windows-release.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-windows-release.zip) | [halo-windows-debug.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-windows-debug.zip) |
+| **Linux (x86)** | [halo-linux-release.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-linux-release.zip) | [halo-linux-debug.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-linux-debug.zip) |
+| **Android (ARM64)** | [halo-android-release.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-android-release.zip) | [halo-android-debug.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-android-debug.zip) |
 
 ### Quick Start (Windows / Linux)
-1. Download the latest release archive from the [**Releases**](https://github.com/SutlabSol/HaloOpenCE-Forge/releases/latest) page and extract it to a folder.
+1. Download the latest release archive from the [**Releases**](https://github.com/SutlabSol/OpenCE-Forge/releases/latest) page and extract it to a folder.
 2. Place your Halo Xbox `maps/` folder (or Halo Xbox `.iso` / `.xiso` disc image) next to `halo.exe` (`halo` on Linux), along with your optional `custom_maps/` (`bitmaps.map`, `sounds.map`, `loc.map`, and Custom Edition `.map` files) and `mcc_maps/` folders.
 3. Launch **`halo.exe`**.
 4. Select **`MULTIPLAYER -> FORGE`** to start forging or manage custom tags under **`TAG OPTIONS`**.
