@@ -311,42 +311,44 @@ static int translate_elsewhere(const char *cursor, char *resolved, unsigned long
 	return 0;
 }
 
-static int starts_with_host_root(const char *path, const char *root)
-{
-	unsigned long index;
-
-	if (!path || !root || !root[0] || !strcmp(root, "."))
-		return 0;
-	for (index = 0; root[index]; index++)
-	{
-		char a = (path[index] == '\\') ? '/' : path[index];
-		char b = (root[index] == '\\') ? '/' : root[index];
-		if (tolower((unsigned char)a) != tolower((unsigned char)b))
-			return 0;
-	}
-	return !path[index] || path[index] == '/' || path[index] == '\\';
-}
-
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size)
 {
 	char resolved[1024];
 	const char *cursor = xbox_path;
+	const char *roots[3];
 	unsigned long length;
+	int root_matched = 0;
+	int r;
 
-	snprintf(resolved, sizeof(resolved), "%s", platform_data_root());
-	if (starts_with_host_root(cursor, platform_data_root()))
+	roots[0] = platform_data_root();
+	roots[1] = platform_save_root();
+	roots[2] = platform_custom_edition_root();
+	snprintf(resolved, sizeof(resolved), "%s", roots[0]);
+	for (r = 0; r < 3; r++)
 	{
-		cursor += strlen(platform_data_root());
+		const char *root = roots[r];
+		unsigned long idx;
+
+		if (!root || !root[0] || !strcmp(root, "."))
+			continue;
+		for (idx = 0; root[idx]; idx++)
+		{
+			char a = (cursor[idx] == '\\') ? '/' : cursor[idx];
+			char b = (root[idx] == '\\') ? '/' : root[idx];
+			if (tolower((unsigned char)a) != tolower((unsigned char)b))
+				break;
+		}
+		if (!root[idx] && (!cursor[idx] || cursor[idx] == '/' || cursor[idx] == '\\'))
+		{
+			snprintf(resolved, sizeof(resolved), "%s", root);
+			cursor += idx;
+			root_matched = 1;
+			break;
+		}
 	}
-	else if (starts_with_host_root(cursor, platform_save_root()))
+	if (root_matched)
 	{
-		snprintf(resolved, sizeof(resolved), "%s", platform_save_root());
-		cursor += strlen(platform_save_root());
-	}
-	else if (starts_with_host_root(cursor, platform_custom_edition_root()))
-	{
-		snprintf(resolved, sizeof(resolved), "%s", platform_custom_edition_root());
-		cursor += strlen(platform_custom_edition_root());
+		/* already anchored at a host root */
 	}
 	else if (((cursor[0] >= 'a' && cursor[0] <= 'z') || (cursor[0] >= 'A' && cursor[0] <= 'Z')) && cursor[1] == ':')
 	{

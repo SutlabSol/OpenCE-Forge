@@ -354,7 +354,7 @@ extern void models_fix_transparent_part_links(void);
 extern boolean custom_edition_cache_tags_loaded(void);
 extern boolean mcc_cache_tags_loaded(void);
 extern char const *mcc_cache_loaded_level_name(void);
-extern boolean mcc_package_map_path(char const *level_name, char *out_path);
+extern int mcc_package_map_path(char const *level_name, char *out_path);
 struct mcc_runtime;
 extern struct mcc_runtime *mcc_forge_browser_open(FILE *map_file, char const *map_path, void *tag_buf, unsigned long tag_size);
 extern void mcc_forge_browser_close(struct mcc_runtime *rt);
