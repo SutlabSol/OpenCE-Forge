@@ -2,7 +2,7 @@
 
 # OpenCE : Forge
 
-**Halo: Combat Evolved for Windows, Linux & Android — Full [OpenCE](https://github.com/OpenCommunityEdition/OpenCE) Port with Integrated 3D Forge Mode (`v2.10.3`)**
+**Halo: Combat Evolved for Windows, Linux & Android — Full [OpenCE](https://github.com/OpenCommunityEdition/OpenCE) Port with Integrated 3D Forge Mode (`v2.10.4`)**
 
 <p align="center">
   <img src="port/assets/icon/opence-icon.png" alt="OpenCE" width="128">
@@ -161,7 +161,7 @@ When a client joins a Forge server whose map uses custom `[C]` tags not yet in t
 
 | Platform | Release Download | Debug Download |
 | :--- | :--- | :--- |
-| **Windows (x86)** | [**OpenCE-Forge-v2.10.3-windows-x86.zip**](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/OpenCE-Forge-v2.10.3-windows-x86.zip) / [halo-windows-release.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-windows-release.zip) | [halo-windows-debug.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-windows-debug.zip) |
+| **Windows (x86)** | [**OpenCE-Forge-v2.10.4-windows-x86.zip**](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/OpenCE-Forge-v2.10.4-windows-x86.zip) / [halo-windows-release.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-windows-release.zip) | [halo-windows-debug.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-windows-debug.zip) |
 | **Linux (x86)** | [halo-linux-release.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-linux-release.zip) | [halo-linux-debug.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-linux-debug.zip) |
 | **Android (ARM64)** | [halo-android-release.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-android-release.zip) | [halo-android-debug.zip](https://github.com/SutlabSol/OpenCE-Forge/releases/latest/download/halo-android-debug.zip) |
 
