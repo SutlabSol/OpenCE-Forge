@@ -3177,19 +3177,8 @@ static boolean network_game_client_idle_ingame(
 		}
 		else if (connection_stale && !client->connection_silent && started)
 		{
-			short local_player_index;
-
-			for (local_player_index = local_player_get_next(NONE);
-				local_player_index != NONE;
-				local_player_index = local_player_get_next(local_player_index))
-			{
-				display_error(
-					_error_network_trouble_is_brewing,
-					local_player_index,
-					FALSE,
-					FALSE);
-			}
-
+			/* port: suppress the intrusive "Waiting for System Link..." modal popup during
+			 * brief tag-loading or map-sync stalls when joining a server. */
 			network_event("network client connection has been silent for a dangerously long amount of time");
 		}
 

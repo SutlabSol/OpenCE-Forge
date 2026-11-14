@@ -122,8 +122,8 @@ static int g_host_machine_mon_synced[FORGE_MAX_CLIENT_MACHINES];
 #define FORGE_TAG_STREAM_OP_CHUNK             2u
 
 #define FORGE_TAG_STREAM_CHUNK_BYTES          1280u
-#define FORGE_TAG_STREAM_MAX_COMP_BYTES       (10u * 1024u * 1024u)
-#define FORGE_TAG_STREAM_MAX_UNCOMP_BYTES     (14u * 1024u * 1024u)
+#define FORGE_TAG_STREAM_MAX_COMP_BYTES       (16u * 1024u * 1024u)
+#define FORGE_TAG_STREAM_MAX_UNCOMP_BYTES     (64u * 1024u * 1024u)
 #define FORGE_TAG_STREAM_MAX_CHUNKS           ((FORGE_TAG_STREAM_MAX_COMP_BYTES + FORGE_TAG_STREAM_CHUNK_BYTES - 1u) / FORGE_TAG_STREAM_CHUNK_BYTES)
 #define FORGE_TAG_STREAM_CHUNKS_PER_TICK      6
 #define FORGE_TAG_STREAM_BYTES_PER_SEC        (128u * 1024u)
@@ -1935,8 +1935,9 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 				else if (machine_index >= 0 && machine_index < FORGE_MAX_CLIENT_MACHINES)
 				{
 					/* Client placed a custom tag (e.g. from a Custom Edition or MCC map) that the Host does not have locally:
-					 * record pending spawn and request the custom tag bundle from the Client over the reliable stream! */
+					 * record pending spawn, ensure machine_index is marked known, and request the custom tag bundle from the Client! */
 					int ps_i;
+					g_host_machine_known[machine_index] = 1;
 					for (ps_i = 0; ps_i < FORGE_TAG_STREAM_MAX_SESSION_TAGS; ps_i++)
 					{
 						if (!g_host_pending_client_spawns[ps_i].active)
@@ -3007,8 +3008,8 @@ void forge_tag_stream_handle_message(
 			}
 
 			ram_used = forge_get_streamed_tag_ram_used();
-			if (ram_used > (24u * 1024u * 1024u) ||
-				offer.uncompressed_size > (24u * 1024u * 1024u) - ram_used)
+			if (ram_used > (128u * 1024u * 1024u) ||
+				(offer.uncompressed_size > 4u * 1024u * 1024u ? 4u * 1024u * 1024u : offer.uncompressed_size) > (128u * 1024u * 1024u) - ram_used)
 			{
 				forge_client_abort_rx(0);
 				return;

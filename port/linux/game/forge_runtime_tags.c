@@ -1055,8 +1055,8 @@ static int compute_catalog_entry_allowed(struct forge_catalog_entry const *entry
 	{
 		return 0;
 	}
-	/* Allow all custom tag cache entries (source_cache_id == 2) and injected donor map tags (source_cache_id == 1) */
-	if (entry->source_cache_id == 2 || entry->source_cache_id == 1)
+	/* Allow all custom tag cache entries (source_cache_id == 2), network-streamed tags (source_cache_id == 4), and injected donor map tags (source_cache_id == 1) */
+	if (entry->source_cache_id == 2 || entry->source_cache_id == 4 || entry->source_cache_id == 1)
 		return 1;
 	/* Exclude all emitters, particle effects, point lights, lens flares, and device scenery props */
 	if (entry->group_tag == 'scen' && is_excluded_scenery_or_effect_tag(entry->tag_path))
@@ -1071,11 +1071,14 @@ static int compute_catalog_entry_allowed(struct forge_catalog_entry const *entry
 			"vehicles\\warthog\\mp_warthog",
 			"vehicles\\rwarthog\\rwarthog",
 			"vehicles\\ghost\\ghost",
+			"vehicles\\ghost\\ghost_mp",
 			"vehicles\\banshee\\banshee",
 			"vehicles\\banshee\\banshee_mp",
 			"vehicles\\scorpion\\scorpion",
+			"vehicles\\scorpion\\scorpion_mp",
 			"vehicles\\pelican\\pelican",
 			"vehicles\\wraith\\wraith",
+			"vehicles\\c_dropship\\c_dropship",
 			"vehicles\\c_gun_turret\\c_gun_turret",
 			"vehicles\\c_gun_turret\\c_gun_turret_mp",
 			"vehicles\\c gun turret\\c gun turret",
@@ -2036,6 +2039,8 @@ static int forge_index_xbox_map_file_to_catalog(
 			cat_id = _forge_cat_scenery;
 		else if ((grp == 'mach' || grp == 'lifi') && is_allowed_forge_light_or_device_tag(grp, tname))
 			cat_id = _forge_cat_scenery;
+		else if (grp == 'bipd' && _stricmp(tname, "characters\\monitor\\monitor") == 0)
+			cat_id = _forge_cat_bipeds;
 
 		if (cat_id < 0 || data_addr < tag_base || (data_addr - tag_base) + 0x38u > tag_sz)
 			continue;
@@ -2378,7 +2383,7 @@ static struct
 	void **ptrs;
 } s_forge_heap_allocs;
 
-#define FORGE_TAG_STREAM_MAX_SESSION_BYTES (24u * 1024u * 1024u)
+#define FORGE_TAG_STREAM_MAX_SESSION_BYTES (128u * 1024u * 1024u)
 struct forge_staged_ephemeral_tag
 {
 	uint8_t active;
@@ -2526,8 +2531,8 @@ void forge_runtime_on_map_unload(void)
 {
 	int i;
 
+	(void)close_runtime_xbox_donor;
 	forge_ui_close_map_tag_browser();
-	close_runtime_xbox_donor();
 
 	/* Dispose injected Custom Edition model buffers FIRST while their gbxmodel
 	 * part definitions in s_forge_phys_allocs are still mapped in memory! */
@@ -4944,6 +4949,15 @@ static int find_donor_map_stems_from_credits(
 	if (!req_path || !req_path[0] || !out_stems || max_stems <= 0)
 		return 0;
 
+	/* Fast-path: 343 Guilty Spark monitor biped is in c10/c20/c40/d20/d40; never scan a10..b40 on join! */
+	if (req_group == 'bipd' && _stricmp(req_path, "characters\\monitor\\monitor") == 0)
+	{
+		static char const *const s_monitor_stems[] = { "c10", "c20", "c40", "d20", "d40" };
+		for (i = 0; i < (int)(sizeof(s_monitor_stems) / sizeof(s_monitor_stems[0])) && count < max_stems; i++)
+			snprintf(out_stems[count++], 64, "%s", s_monitor_stems[i]);
+		return count;
+	}
+
 	ensure_credits_loaded();
 	if (s_credits_entry_count <= 0 || !s_credits_entries)
 		return 0;
@@ -5017,6 +5031,12 @@ int forge_find_credits_tag_by_hash(uint32_t hash, uint32_t *out_group_tag, char 
 	}
 	return 0;
 }
+
+static int try_extract_tag_from_mcc_maps_to_vault(uint32_t req_group, char const *req_path);
+static long load_faber_vault_tag_bundle_runtime(
+	uint32_t req_group,
+	char const *req_path,
+	uint32_t *out_actual_group);
 
 static long load_native_xbox_tag_runtime(
 	uint32_t req_group,
@@ -5116,6 +5136,15 @@ static long load_native_xbox_tag_runtime(
 			} while (FindNextFileA(h, &fd));
 			CloseHandle(h);
 		}
+	}
+
+	/* 4. Fallback: if the tag is in an MCC map (e.g. rwarthog, banshee_mp, c_gun_turret_mp, or MCC-only donor),
+	 * extract and convert it from mcc_maps/ into the Tag Vault and load it! */
+	if (try_extract_tag_from_mcc_maps_to_vault(req_group, req_path))
+	{
+		long mcc_hdl = load_faber_vault_tag_bundle_runtime(req_group, req_path, out_actual_group);
+		if (mcc_hdl != NONE)
+			return mcc_hdl;
 	}
 	return NONE;
 }
@@ -5684,14 +5713,47 @@ static long load_faber_vault_tag_bundle_runtime(
 					uint8_t *uncomp_buf = (uint8_t *)malloc(bundle_size);
 					if (uncomp_buf && port_tag_profiles_bundle_read_at(b_handle, 0, uncomp_buf, bundle_size))
 					{
-						root_handle = load_native_xbox_tag_from_source(
-							NULL,
-							uncomp_buf,
-							(uint32_t)bundle_size,
-							req_group,
-							req_path,
-							out_actual_group,
-							0);
+						uint32_t b_tag_off = *(uint32_t const *)(uncomp_buf + 0x10);
+						if (b_tag_off >= 2048u && b_tag_off + 0x28u <= bundle_size &&
+							*(uint32_t const *)(uncomp_buf + b_tag_off + 0x24u) == 0x74616773u)
+						{
+							/* Pre-v2.10.6 unconverted MCC bundle in tag_vault: auto-upgrade in-place from mcc_maps/ */
+							port_tag_profiles_bundle_close(b_handle);
+							b_handle = NONE;
+							free(uncomp_buf);
+							uncomp_buf = NULL;
+							if (try_extract_tag_from_mcc_maps_to_vault(req_group, req_path))
+							{
+								long up_p = port_tag_profiles_count() > 0 ? 0 : -1;
+								long up_t = (up_p >= 0) ? port_tag_profiles_tag_find(up_p, (unsigned long)req_group, req_path) : -1;
+								if (up_t < 0 && req_group == 'mode' && up_p >= 0)
+									up_t = port_tag_profiles_tag_find(up_p, (unsigned long)'mod2', req_path);
+								if (up_p >= 0 && up_t >= 0)
+								{
+									b_handle = port_tag_profiles_bundle_open(up_p, up_t, &bundle_size);
+									if (b_handle != NONE && bundle_size >= 2048u && bundle_size <= 64u * 1024u * 1024u)
+									{
+										uncomp_buf = (uint8_t *)malloc(bundle_size);
+										if (!uncomp_buf || !port_tag_profiles_bundle_read_at(b_handle, 0, uncomp_buf, bundle_size))
+										{
+											free(uncomp_buf);
+											uncomp_buf = NULL;
+										}
+									}
+								}
+							}
+						}
+						if (uncomp_buf)
+						{
+							root_handle = load_native_xbox_tag_from_source(
+								NULL,
+								uncomp_buf,
+								(uint32_t)bundle_size,
+								req_group,
+								req_path,
+								out_actual_group,
+								0);
+						}
 					}
 					free(uncomp_buf);
 				}
@@ -10534,6 +10596,128 @@ static int extract_xbox_map_tag_to_vault(
 	return added;
 }
 
+static int try_extract_tag_from_single_mcc_map_file(
+	char const *map_path,
+	uint32_t req_group,
+	char const *req_path,
+	char const *clean_name)
+{
+	int32_t i;
+	int ok = 0;
+
+	if (!map_path || !map_path[0] || !is_mcc_version13_map_file(map_path))
+		return 0;
+	if (!forge_ui_open_map_for_tag_browser(map_path))
+		return 0;
+
+	for (i = 0; i < s_map_browser.xbox_tag_count; i++)
+	{
+		uint32_t grp = browser_tag_group_at(i);
+		if ((grp == req_group || (req_group == 'mode' && grp == 'mod2') || (req_group == 'mod2' && grp == 'mode')) &&
+			_stricmp(browser_tag_name_at(i), req_path) == 0)
+		{
+			ok = extract_xbox_map_tag_to_vault(i, grp, req_path, clean_name);
+			break;
+		}
+	}
+	forge_ui_close_map_tag_browser();
+	return ok;
+}
+
+static int try_extract_tag_from_mcc_maps_to_vault(uint32_t req_group, char const *req_path)
+{
+	static char const *const s_mcc_dirs[] = {
+		"mcc_maps",
+		"assets/mcc_maps",
+		"../assets/mcc_maps"
+	};
+	char prev_map_path[512];
+	int was_open = s_map_browser.is_open;
+	char clean_name[64];
+	char const *leaf;
+	char const *p;
+	char candidate_stems[8][64];
+	int stem_count, s, d;
+	int extracted = 0;
+
+	if (!req_path || !req_path[0])
+		return 0;
+
+	prev_map_path[0] = '\0';
+	if (was_open && s_map_browser.map_path[0])
+		snprintf(prev_map_path, sizeof(prev_map_path), "%s", s_map_browser.map_path);
+
+	leaf = req_path;
+	for (p = req_path; *p; p++)
+	{
+		if (*p == '\\' || *p == '/')
+			leaf = p + 1;
+	}
+	snprintf(clean_name, sizeof(clean_name), "%s", leaf[0] ? leaf : "custom_tag");
+
+	/* 1. Check candidate map stems from credits.md first */
+	stem_count = find_donor_map_stems_from_credits(req_group, req_path, candidate_stems, 8);
+	for (s = 0; s < stem_count && !extracted; s++)
+	{
+		for (d = 0; d < (int)(sizeof(s_mcc_dirs) / sizeof(s_mcc_dirs[0])) && !extracted; d++)
+		{
+			char full_path[512];
+			snprintf(full_path, sizeof(full_path), "%s/%s.map", s_mcc_dirs[d], candidate_stems[s]);
+			if (try_extract_tag_from_single_mcc_map_file(full_path, req_group, req_path, clean_name))
+				extracted = 1;
+		}
+	}
+
+	/* 2. Check common multiplayer MCC maps with unique vehicles/weapons (bloodgulch, deathisland, timberland, infinity, gephyrophobia) */
+	if (!extracted)
+	{
+		static char const *const s_mp_mcc_stems[] = {
+			"bloodgulch", "deathisland", "gephyrophobia", "infinity", "timberland", "icefields", "dangercanyon", "sidewinder"
+		};
+		for (s = 0; s < (int)(sizeof(s_mp_mcc_stems) / sizeof(s_mp_mcc_stems[0])) && !extracted; s++)
+		{
+			for (d = 0; d < (int)(sizeof(s_mcc_dirs) / sizeof(s_mcc_dirs[0])) && !extracted; d++)
+			{
+				char full_path[512];
+				snprintf(full_path, sizeof(full_path), "%s/%s.map", s_mcc_dirs[d], s_mp_mcc_stems[s]);
+				if (try_extract_tag_from_single_mcc_map_file(full_path, req_group, req_path, clean_name))
+					extracted = 1;
+			}
+		}
+	}
+
+	/* 3. Scan remaining MCC maps in mcc_maps/ */
+	for (d = 0; d < (int)(sizeof(s_mcc_dirs) / sizeof(s_mcc_dirs[0])) && !extracted; d++)
+	{
+		char pattern[512];
+		WIN32_FIND_DATAA fd;
+		HANDLE h;
+		snprintf(pattern, sizeof(pattern), "%s\\*.map", s_mcc_dirs[d]);
+		h = FindFirstFileA(pattern, &fd);
+		if (h != INVALID_HANDLE_VALUE)
+		{
+			do
+			{
+				char full_path[512];
+				if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+					continue;
+				snprintf(full_path, sizeof(full_path), "%s/%s", s_mcc_dirs[d], fd.cFileName);
+				if (try_extract_tag_from_single_mcc_map_file(full_path, req_group, req_path, clean_name))
+				{
+					extracted = 1;
+					break;
+				}
+			} while (FindNextFileA(h, &fd));
+			CloseHandle(h);
+		}
+	}
+
+	if (was_open && prev_map_path[0])
+		forge_ui_open_map_for_tag_browser(prev_map_path);
+
+	return extracted;
+}
+
 int forge_ui_extract_selected_map_tag(int category_tab, int list_index, char const *custom_name)
 {
 	int32_t abs_idx;
@@ -10748,7 +10932,21 @@ int forge_cache_active_map_tag(uint32_t group_tag, char const *tag_path)
 		return 0;
 	}
 	if (!forge_is_tag_map_local_only(group_tag, tag_path))
-		return 1;
+	{
+		long prof_cnt = port_tag_profiles_count();
+		long p_i;
+		int in_vault = 0;
+		for (p_i = 0; p_i < prof_cnt; p_i++)
+		{
+			if (port_tag_profiles_tag_find(p_i, (unsigned long)group_tag, tag_path) >= 0)
+			{
+				in_vault = 1;
+				break;
+			}
+		}
+		if (in_vault)
+			return 1;
+	}
 
 	leaf = tag_path;
 	for (p = tag_path; *p; p++)
@@ -12909,7 +13107,7 @@ int forge_zlib_compress_buffer(uint8_t const *src, uint32_t src_len, uint8_t **o
 	unsigned long comp_len;
 	uint8_t *dst;
 
-	if (!src || src_len == 0 || src_len > 16u * 1024u * 1024u || !out_dst || !out_dst_len)
+	if (!src || src_len == 0 || src_len > 64u * 1024u * 1024u || !out_dst || !out_dst_len)
 		return 0;
 
 	bound = (unsigned long)src_len + ((unsigned long)src_len >> 10) + 128ul;
@@ -12937,7 +13135,7 @@ int forge_zlib_uncompress_exact(uint8_t const *src, uint32_t src_len, uint8_t *d
 {
 	unsigned long out_len;
 
-	if (!src || src_len == 0 || !dst || exact_dst_len == 0 || exact_dst_len > 16u * 1024u * 1024u)
+	if (!src || src_len == 0 || !dst || exact_dst_len == 0 || exact_dst_len > 64u * 1024u * 1024u)
 		return 0;
 
 	out_len = (unsigned long)exact_dst_len;
@@ -13053,7 +13251,7 @@ int forge_export_custom_tag_bundle(
 			b_hdl = port_tag_profiles_bundle_open(p, t, &bundle_sz);
 			if (b_hdl == NONE)
 				continue;
-			if (bundle_sz < TAG_BUNDLE_HEADER_BYTES || bundle_sz > 14u * 1024u * 1024u)
+			if (bundle_sz < TAG_BUNDLE_HEADER_BYTES || bundle_sz > 64u * 1024u * 1024u)
 			{
 				port_tag_profiles_bundle_close(b_hdl);
 				continue;
@@ -13066,6 +13264,42 @@ int forge_export_custom_tag_bundle(
 				continue;
 			}
 			port_tag_profiles_bundle_close(b_hdl);
+
+			if (bundle_sz >= 2048u && *(uint32_t const *)raw == 0x68656164u)
+			{
+				uint32_t b_tag_off = *(uint32_t const *)(raw + 0x10);
+				if (b_tag_off >= 2048u && b_tag_off + 0x28u <= bundle_sz &&
+					*(uint32_t const *)(raw + b_tag_off + 0x24u) == 0x74616773u)
+				{
+					/* Auto-upgrade pre-v2.10.6 unconverted MCC bundle before streaming over the network */
+					char saved_tname[256];
+					snprintf(saved_tname, sizeof(saved_tname), "%s", tname);
+					if (try_extract_tag_from_mcc_maps_to_vault(grp, saved_tname))
+					{
+						long up_t = port_tag_profiles_tag_find(p, (unsigned long)grp, saved_tname);
+						unsigned long up_sz = 0;
+						long up_hdl = (up_t >= 0) ? port_tag_profiles_bundle_open(p, up_t, &up_sz) : NONE;
+						if (up_hdl != NONE && up_sz >= 2048u && up_sz <= 64u * 1024u * 1024u)
+						{
+							uint8_t *up_raw = (uint8_t *)malloc((size_t)up_sz);
+							if (up_raw && port_tag_profiles_bundle_read_at(up_hdl, 0, up_raw, up_sz))
+							{
+								free(raw);
+								raw = up_raw;
+								bundle_sz = up_sz;
+								t = up_t;
+								tname = port_tag_profiles_tag_name(p, t);
+							}
+							else
+							{
+								free(up_raw);
+							}
+						}
+						if (up_hdl != NONE)
+							port_tag_profiles_bundle_close(up_hdl);
+					}
+				}
+			}
 
 			opt_name = port_tag_profiles_tag_option(p, t, "name");
 			*out_format = (*(uint32_t const *)raw == 0x68656164u) ? 2u : 1u;
@@ -13096,6 +13330,95 @@ int forge_export_custom_tag_bundle(
 		*out_raw_bytes = raw_copy;
 		*out_raw_size = st->raw_size;
 		return 1;
+	}
+
+	/* 3. On-demand extraction: if the requested hash belongs to a tag in our catalog, live instances, or credits
+	 * that was not yet extracted into port_tag_profiles (e.g. a [MAP] vehicle/weapon on an MCC or CE map),
+	 * extract it into the Tag Vault now and export it! */
+	{
+		uint32_t cand_grp = 0;
+		char cand_path[256];
+		cand_path[0] = '\0';
+
+		for (i = 0; i < g_forge.catalog_count; i++)
+		{
+			if (g_forge.catalog[i].group_tag != 0 &&
+				g_forge.catalog[i].tag_path[0] &&
+				forge_compute_catalog_hash(g_forge.catalog[i].group_tag, g_forge.catalog[i].tag_path) == hash)
+			{
+				cand_grp = g_forge.catalog[i].group_tag;
+				snprintf(cand_path, sizeof(cand_path), "%s", g_forge.catalog[i].tag_path);
+				break;
+			}
+		}
+		if (!cand_path[0])
+		{
+			for (i = 0; i < g_forge.live_instance_count; i++)
+			{
+				if (g_forge.live_instances[i].active &&
+					g_forge.live_instances[i].group_tag != 0 &&
+					g_forge.live_instances[i].tag_path[0] &&
+					forge_compute_catalog_hash(g_forge.live_instances[i].group_tag, g_forge.live_instances[i].tag_path) == hash)
+				{
+					cand_grp = g_forge.live_instances[i].group_tag;
+					snprintf(cand_path, sizeof(cand_path), "%s", g_forge.live_instances[i].tag_path);
+					break;
+				}
+			}
+		}
+		if (!cand_path[0])
+			forge_find_credits_tag_by_hash(hash, &cand_grp, cand_path, sizeof(cand_path));
+
+		if (cand_path[0] && forge_stream_group_is_allowed_root(cand_grp))
+		{
+			int extracted_now = forge_cache_active_map_tag(cand_grp, cand_path);
+			if (!extracted_now)
+				extracted_now = try_extract_tag_from_mcc_maps_to_vault(cand_grp, cand_path);
+			else
+			{
+				long p_chk = (port_tag_profiles_count() > 0) ? 0 : -1;
+				if (p_chk < 0 || port_tag_profiles_tag_find(p_chk, (unsigned long)cand_grp, cand_path) < 0)
+					extracted_now = try_extract_tag_from_mcc_maps_to_vault(cand_grp, cand_path);
+			}
+			if (extracted_now)
+			{
+				prof_count = port_tag_profiles_count();
+				for (p = 0; p < prof_count; p++)
+				{
+					long t_slot = port_tag_profiles_tag_find(p, (unsigned long)cand_grp, cand_path);
+					unsigned long bundle_sz = 0;
+					long b_hdl;
+					uint8_t *raw;
+					char const *opt_name;
+					if (t_slot < 0)
+						continue;
+					b_hdl = port_tag_profiles_bundle_open(p, t_slot, &bundle_sz);
+					if (b_hdl == NONE)
+						continue;
+					if (bundle_sz < TAG_BUNDLE_HEADER_BYTES || bundle_sz > 64u * 1024u * 1024u)
+					{
+						port_tag_profiles_bundle_close(b_hdl);
+						continue;
+					}
+					raw = (uint8_t *)malloc((size_t)bundle_sz);
+					if (!raw || !port_tag_profiles_bundle_read_at(b_hdl, 0, raw, bundle_sz))
+					{
+						free(raw);
+						port_tag_profiles_bundle_close(b_hdl);
+						continue;
+					}
+					port_tag_profiles_bundle_close(b_hdl);
+					opt_name = port_tag_profiles_tag_option(p, t_slot, "name");
+					*out_format = (*(uint32_t const *)raw == 0x68656164u) ? 2u : 1u;
+					*out_group_tag = cand_grp;
+					snprintf(out_tag_path, path_sz, "%s", cand_path);
+					snprintf(out_display_name, disp_sz, "%s", (opt_name && opt_name[0]) ? opt_name : cand_path);
+					*out_raw_bytes = raw;
+					*out_raw_size = (uint32_t)bundle_sz;
+					return 1;
+				}
+			}
+		}
 	}
 
 	return 0;
@@ -13286,7 +13609,7 @@ long forge_install_ephemeral_tag_bundle(
 		return NONE;
 	if (forge_compute_catalog_hash(root_group, root_tag_path) != expected_hash)
 		return NONE;
-	if (!uncomp_bytes || uncomp_size < TAG_BUNDLE_HEADER_BYTES || uncomp_size > 14u * 1024u * 1024u)
+	if (!uncomp_bytes || uncomp_size < TAG_BUNDLE_HEADER_BYTES || uncomp_size > 64u * 1024u * 1024u)
 		return NONE;
 
 	/* Never shadow or overwrite an existing base-map tag */
@@ -13303,7 +13626,7 @@ long forge_install_ephemeral_tag_bundle(
 
 	/* Enforce strict per-session RAM cap and slot headroom */
 	if (s_streamed_phys_bytes > FORGE_TAG_STREAM_MAX_SESSION_BYTES ||
-		uncomp_size > FORGE_TAG_STREAM_MAX_SESSION_BYTES - s_streamed_phys_bytes)
+		(uncomp_size > 4u * 1024u * 1024u ? 4u * 1024u * 1024u : uncomp_size) > FORGE_TAG_STREAM_MAX_SESSION_BYTES - s_streamed_phys_bytes)
 	{
 		return NONE;
 	}
@@ -13339,7 +13662,7 @@ long forge_install_ephemeral_tag_bundle(
 	if (root_hdl == NONE)
 		return NONE;
 
-	s_streamed_phys_bytes += uncomp_size;
+	s_streamed_phys_bytes += (uncomp_size > 4u * 1024u * 1024u) ? (4u * 1024u * 1024u) : uncomp_size;
 
 	if (display_name)
 	{
