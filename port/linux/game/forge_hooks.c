@@ -2114,6 +2114,15 @@ boolean pc_menu_event_function_invoke(
 	{
 		g_forge_session_enabled = 0;
 		s_forge_active_map_kind = 1;
+		if (strcmp(fn_name, "gamemode select standard") == 0 ||
+			(strcmp(fn_name, "gamemode select choose") == 0 && strcmp(w_name, "gm_forge_item") != 0))
+		{
+			struct game_variant v;
+			struct game_variant_options vo;
+			build_game_variant_slayer(&v);
+			game_variant_options_default(&v, &vo);
+			ui_widget_port_game_variant_set(&v, &vo);
+		}
 	}
 
 	/* Forge -> Tag Options: ADD TAGS / INSTALLED TAGS / NAME TAG / DELETE / RESET */
@@ -3311,8 +3320,8 @@ void network_chat_update(void)
 		return;
 	}
 
-	/* Auto-enable g_forge_session_enabled if we joined a Forge game via standard Join Game */
-	if (!g_forge_session_enabled)
+	/* Auto-enable g_forge_session_enabled ONLY on network clients joining a Forge server via Join Game */
+	if (!g_forge_session_enabled && game_connection() == _game_connection_network_client)
 	{
 		struct game_variant const *v = game_engine_get_variant();
 		if (v && (_wcsicmp(v->human_readable_game_description, L"Forge") == 0 ||
@@ -3567,13 +3576,14 @@ void render_model(
 		}
 	}
 
-	/* Ensure custom scenery/device models inside .map files never disappear at distance due to
+	/* Ensure custom scenery/device/weapon/unit models inside .map files never disappear at distance due to
 	 * non-zero super_low detail_cutoff_pixels[0] or missing low-LOD permutation geometry_indices */
 	if (unique_identifier != NONE && model_index != NONE)
 	{
 		struct object_datum *scen_obj = (struct object_datum *)object_try_and_get_and_verify_type(
 			unique_identifier,
-			_object_mask_scenery | _object_mask_machine | _object_mask_light_fixture | _object_mask_control);
+			_object_mask_scenery | _object_mask_machine | _object_mask_light_fixture |
+			_object_mask_control | _object_mask_item | _object_mask_unit);
 		if (scen_obj)
 		{
 			struct model *m = model_definition_get(model_index);
@@ -3824,7 +3834,9 @@ void menu_tags_loaded(char const *map_name)
 	else
 	{
 		struct game_variant const *v = game_engine_get_variant();
-		if (!g_forge_session_enabled && v &&
+		if (!g_forge_session_enabled &&
+			game_connection() == _game_connection_network_client &&
+			v &&
 			(_wcsicmp(v->human_readable_game_description, L"Forge") == 0 ||
 			 v->universal_variant.score_to_win == 0x3FFFFFFF))
 		{
@@ -4324,10 +4336,9 @@ byte forge_game_modes_kind(struct game_variant const *variant, struct game_varia
 	if (variant && (_wcsicmp(variant->human_readable_game_description, L"Forge") == 0 ||
 					variant->universal_variant.score_to_win == 0x3FFFFFFF))
 	{
-		g_forge_session_enabled = 1;
+		return FORGE_GAME_KIND;
 	}
-	if (g_forge_session_enabled ||
-		(variant && _wcsicmp(variant->human_readable_game_description, L"Forge") == 0))
+	if (g_forge_session_enabled && !variant)
 	{
 		return FORGE_GAME_KIND;
 	}
@@ -4346,10 +4357,9 @@ wchar_t const *forge_game_modes_variant_kind_name(struct game_variant const *var
 	if (variant && (_wcsicmp(variant->human_readable_game_description, L"Forge") == 0 ||
 					variant->universal_variant.score_to_win == 0x3FFFFFFF))
 	{
-		g_forge_session_enabled = 1;
+		return L"FORGE";
 	}
-	if (g_forge_session_enabled ||
-		(variant && _wcsicmp(variant->human_readable_game_description, L"Forge") == 0))
+	if (g_forge_session_enabled && !variant)
 	{
 		return L"FORGE";
 	}

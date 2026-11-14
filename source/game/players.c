@@ -4308,8 +4308,14 @@ static void player_examine_nearby_item(
 	player = player_get(player_index);
 	unit = unit_get(player->unit_index);
 	item = item_get(item_index);
-	/* port: do not pick up ammo, grenades, weapons, or equipment or show pickup prompts while in Forge Monitor mode */
+	/* port: do not pick up ammo, grenades, weapons, or equipment or show pickup prompts while in Forge Monitor mode,
+	 * and in Forge sessions do not allow picking up weapons or grenades dropped by players/units on death or weapon drop */
 	if (player->unit_index != NONE && forge_is_unit_in_monitor_mode(player->unit_index))
+	{
+		return;
+	}
+	if (g_forge_session_enabled &&
+		(item->item.ignore_object_index != NONE || item->object.owner_player_index != NONE))
 	{
 		return;
 	}

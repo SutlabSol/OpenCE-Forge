@@ -230,12 +230,24 @@ struct forge_client_pending_instance
 	int32_t weap0_abs;
 };
 
+struct forge_host_pending_client_spawn
+{
+	uint8_t active;
+	int32_t machine_index;
+	uint32_t hash;
+	float x, y, z;
+	int yaw_cr, pitch_cr, roll_cr;
+	int16_t team;
+};
+
 static struct forge_host_cached_tag_bundle g_host_tag_cache[FORGE_TAG_STREAM_MAX_SESSION_TAGS];
 static struct forge_host_client_tag_tx g_host_tag_tx[FORGE_MAX_CLIENT_MACHINES];
+static struct forge_host_pending_client_spawn g_host_pending_client_spawns[FORGE_TAG_STREAM_MAX_SESSION_TAGS];
 
 static struct
 {
 	enum forge_client_tag_rx_state state;
+	int32_t source_machine_index;
 	uint32_t hash;
 	uint32_t transfer_id;
 	uint32_t next_transfer_seq;
@@ -253,6 +265,7 @@ static struct
 	uint32_t chunk_seen[(FORGE_TAG_STREAM_MAX_CHUNKS + 31u) / 32u];
 	uint32_t queue[FORGE_TAG_STREAM_MAX_SESSION_TAGS];
 	uint8_t queue_attempts[FORGE_TAG_STREAM_MAX_SESSION_TAGS];
+	int32_t queue_source_machine[FORGE_TAG_STREAM_MAX_SESSION_TAGS];
 	int queue_count;
 	uint8_t active_attempts;
 	uint32_t settled_hashes[FORGE_TAG_STREAM_MAX_SESSION_TAGS * 2];
@@ -265,6 +278,7 @@ static struct forge_client_pending_instance g_pending_inst_stream[FORGE_MAX_LIVE
 
 static void forge_tag_stream_reset_state(void);
 static void forge_tag_stream_tick(unsigned long now);
+static void forge_enqueue_tag_download_from(uint32_t hash, int32_t source_machine_index);
 static void forge_client_enqueue_tag_download(uint32_t hash);
 static int32_t forge_client_upsert_stream_proxy_instance(
 	int host_live_idx,
@@ -570,7 +584,8 @@ void forge_network_reset_session(void)
 		g_net_obj_def_index[i] = NONE;
 		g_net_obj_live_index[i] = -1;
 		g_net_obj_is_held[i] = 0;
-		g_net_obj_has_deferred_create[i] = 0;
+		/* Note: do not clear g_net_obj_has_deferred_create[i] here because on client join,
+		 * _distributed_message_object_changes can arrive before forge_runtime_init() runs on tick 0. */
 	}
 	for (i = 0; i < FORGE_MAX_CLIENT_MACHINES; i++)
 	{
@@ -1137,18 +1152,34 @@ static long forge_find_live_object_by_abs_index(int obj_abs)
 {
 	if (obj_abs < 0 || !object_header_data)
 		return NONE;
-	if (obj_abs < object_header_data->count)
+	if (obj_abs < object_header_data->maximum_count)
 	{
-		long cand;
-		for (cand = data_next_index(object_header_data, NONE);
-			 cand != NONE;
-			 cand = data_next_index(object_header_data, cand))
+		struct datum_header const *hdr = (struct datum_header const *)(
+			(byte const *)object_header_data->data + obj_abs * object_header_data->size);
+		if (hdr->identifier != 0)
 		{
-			if ((int)DATUM_INDEX_TO_ABSOLUTE_INDEX(cand) == obj_abs)
+			long cand = ((long)(unsigned short)hdr->identifier << 16) | (obj_abs & 0xFFFF);
+			if (object_try_and_get_and_verify_type(cand, (unsigned long)-1) != NULL)
 				return cand;
 		}
 	}
 	return NONE;
+}
+
+static void forge_net_euler_to_vectors(float yaw, float pitch, float roll, real_vector3d *out_fwd, real_vector3d *out_up)
+{
+	float cy = (float)cos((double)yaw);
+	float sy = (float)sin((double)yaw);
+	float cp = (float)cos((double)pitch);
+	float sp = (float)sin((double)pitch);
+	float cr = (float)cos((double)roll);
+	float sr = (float)sin((double)roll);
+	out_fwd->i = cy * cp;
+	out_fwd->j = sy * cp;
+	out_fwd->k = sp;
+	out_up->i = -cy * sp * cr + sy * sr;
+	out_up->j = -sy * sp * cr - cy * sr;
+	out_up->k = cp * cr;
 }
 
 static int32_t forge_resolve_target_live_idx(int live_idx, int obj_abs)
@@ -1232,6 +1263,12 @@ static void forge_client_configure_linked_object(int32_t live_idx, long obj_idx,
 
 	if (live_idx >= 0 && live_idx < g_forge.live_instance_count && g_forge.live_instances[live_idx].active)
 	{
+		long prev_obj = g_forge.live_instances[live_idx].object_index;
+		if (prev_obj != NONE && prev_obj != obj_idx)
+		{
+			if (object_try_and_get_and_verify_type(prev_obj, (unsigned long)-1))
+				object_delete(prev_obj);
+		}
 		g_forge.live_instances[live_idx].object_index = obj_idx;
 		if (g_forge.grabbed_live_index == live_idx)
 			g_forge.grabbed_object_index = obj_idx;
@@ -1530,7 +1567,7 @@ static void forge_client_handle_host_spawn(
 			}
 		}
 
-		/* If _distributed_message_object_changes arrived BEFORE !FH:, replay deferred creation now! */
+		/* If _distributed_message_object_changes arrived BEFORE !FH: (or was missed on late-join), create/replay now! */
 		existing_obj = forge_find_live_object_by_abs_index(obj_abs);
 		if (existing_obj == NONE && g_net_obj_has_deferred_create[obj_abs] && def_idx != NONE)
 		{
@@ -1540,15 +1577,53 @@ static void forge_client_handle_host_spawn(
 			orig_network_objects_handle_changes(&re_change, 1);
 			existing_obj = forge_find_live_object_by_abs_index(obj_abs);
 		}
+		if (existing_obj == NONE && def_idx != NONE && ce->group_tag != 'actv')
+		{
+			struct forge_distributed_object_change synth;
+			memset(&synth, 0, sizeof(synth));
+			synth.change = 0; /* _object_change_create */
+			synth.owner_player_index = (byte)NONE;
+			synth.forced_shader_permutation_index = (byte)NONE;
+			synth.object_index = ((long)1 << 16) | (obj_abs & 0xFFFF);
+			synth.definition_index = def_idx;
+			synth.owner_team_index = team_designator;
+			synth.variant_number = NONE;
+			synth.position.x = x;
+			synth.position.y = y;
+			synth.position.z = z;
+			forge_net_euler_to_vectors(yaw, pitch, roll, &synth.forward, &synth.up);
+			orig_network_objects_handle_changes(&synth, 1);
+			existing_obj = forge_find_live_object_by_abs_index(obj_abs);
+		}
 
 		if (weap0_abs >= 0 && weap0_abs < FORGE_MAX_TRACKED_NET_OBJECTS &&
 			forge_find_live_object_by_abs_index(weap0_abs) == NONE &&
-			g_net_obj_has_deferred_create[weap0_abs] && weap0_def_idx != NONE)
+			weap0_def_idx != NONE)
 		{
-			struct forge_distributed_object_change re_weap = g_net_obj_deferred_create[weap0_abs];
-			g_net_obj_has_deferred_create[weap0_abs] = 0;
-			re_weap.definition_index = weap0_def_idx;
-			orig_network_objects_handle_changes(&re_weap, 1);
+			if (g_net_obj_has_deferred_create[weap0_abs])
+			{
+				struct forge_distributed_object_change re_weap = g_net_obj_deferred_create[weap0_abs];
+				g_net_obj_has_deferred_create[weap0_abs] = 0;
+				re_weap.definition_index = weap0_def_idx;
+				orig_network_objects_handle_changes(&re_weap, 1);
+			}
+			else
+			{
+				struct forge_distributed_object_change synth_w;
+				memset(&synth_w, 0, sizeof(synth_w));
+				synth_w.change = 0;
+				synth_w.owner_player_index = (byte)NONE;
+				synth_w.forced_shader_permutation_index = (byte)NONE;
+				synth_w.object_index = ((long)1 << 16) | (weap0_abs & 0xFFFF);
+				synth_w.definition_index = weap0_def_idx;
+				synth_w.owner_team_index = team_designator;
+				synth_w.variant_number = NONE;
+				synth_w.position.x = x;
+				synth_w.position.y = y;
+				synth_w.position.z = z;
+				forge_net_euler_to_vectors(yaw, pitch, roll, &synth_w.forward, &synth_w.up);
+				orig_network_objects_handle_changes(&synth_w, 1);
+			}
 		}
 
 		if (existing_obj != NONE && match_idx >= 0 && match_idx < g_forge.live_instance_count)
@@ -1791,6 +1866,13 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 				forge_net_coords_valid(x, y, z, yaw_cr, pitch_cr, roll_cr))
 			{
 				struct forge_catalog_entry const *ce = forge_find_catalog_entry_by_hash(hash);
+				if (ce && ce->group_tag != 'spwn' && ce->group_tag != 'tele' &&
+					ce->group_tag != 'flag' && ce->group_tag != 'actv')
+				{
+					uint32_t check_grp = ce->group_tag;
+					if (forge_resolve_engine_tag(ce->group_tag, ce->tag_path, &check_grp) == NONE)
+						ce = NULL;
+				}
 				if (ce)
 				{
 					int32_t spawned_idx;
@@ -1826,6 +1908,30 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 						forge_broadcast_packet_to_clients(relay_props, -1);
 					}
 					forge_server_mark_dirty();
+				}
+				else if (machine_index >= 0 && machine_index < FORGE_MAX_CLIENT_MACHINES)
+				{
+					/* Client placed a custom tag (e.g. from a Custom Edition or MCC map) that the Host does not have locally:
+					 * record pending spawn and request the custom tag bundle from the Client over the reliable stream! */
+					int ps_i;
+					for (ps_i = 0; ps_i < FORGE_TAG_STREAM_MAX_SESSION_TAGS; ps_i++)
+					{
+						if (!g_host_pending_client_spawns[ps_i].active)
+						{
+							g_host_pending_client_spawns[ps_i].active = 1u;
+							g_host_pending_client_spawns[ps_i].machine_index = (int32_t)machine_index;
+							g_host_pending_client_spawns[ps_i].hash = (uint32_t)hash;
+							g_host_pending_client_spawns[ps_i].x = x;
+							g_host_pending_client_spawns[ps_i].y = y;
+							g_host_pending_client_spawns[ps_i].z = z;
+							g_host_pending_client_spawns[ps_i].yaw_cr = yaw_cr;
+							g_host_pending_client_spawns[ps_i].pitch_cr = pitch_cr;
+							g_host_pending_client_spawns[ps_i].roll_cr = roll_cr;
+							g_host_pending_client_spawns[ps_i].team = (int16_t)(team < -1 ? -1 : (team > 31 ? 31 : team));
+							break;
+						}
+					}
+					forge_enqueue_tag_download_from((uint32_t)hash, (int32_t)machine_index);
 				}
 			}
 			return 1;
@@ -1873,6 +1979,25 @@ int forge_network_intercept_chat_packet(long machine_index, char const *text, in
 						roll_cr,
 						(n >= 9 && is_held) ? 1 : 0);
 					forge_broadcast_packet_to_clients(relay, machine_index);
+				}
+				else if (machine_index >= 0 && machine_index < FORGE_MAX_CLIENT_MACHINES)
+				{
+					/* Update latest coordinates on any pending client custom-tag spawn from this machine */
+					int ps_i;
+					for (ps_i = FORGE_TAG_STREAM_MAX_SESSION_TAGS - 1; ps_i >= 0; ps_i--)
+					{
+						if (g_host_pending_client_spawns[ps_i].active &&
+							g_host_pending_client_spawns[ps_i].machine_index == (int32_t)machine_index)
+						{
+							g_host_pending_client_spawns[ps_i].x = x;
+							g_host_pending_client_spawns[ps_i].y = y;
+							g_host_pending_client_spawns[ps_i].z = z;
+							g_host_pending_client_spawns[ps_i].yaw_cr = yaw_cr;
+							g_host_pending_client_spawns[ps_i].pitch_cr = pitch_cr;
+							g_host_pending_client_spawns[ps_i].roll_cr = roll_cr;
+							break;
+						}
+					}
 				}
 			}
 			return 1;
@@ -2135,10 +2260,12 @@ static void forge_tag_stream_reset_state(void)
 	}
 	memset(g_host_tag_cache, 0, sizeof(g_host_tag_cache));
 	memset(g_host_tag_tx, 0, sizeof(g_host_tag_tx));
+	memset(g_host_pending_client_spawns, 0, sizeof(g_host_pending_client_spawns));
 
 	if (g_client_tag_rx.comp_buf)
 		free(g_client_tag_rx.comp_buf);
 	memset(&g_client_tag_rx, 0, sizeof(g_client_tag_rx));
+	g_client_tag_rx.source_machine_index = -1;
 
 	memset(g_pending_inst_stream, 0, sizeof(g_pending_inst_stream));
 }
@@ -2169,6 +2296,7 @@ static void forge_client_abort_rx(int mode)
 {
 	uint32_t prev_hash = g_client_tag_rx.hash;
 	uint8_t prev_attempts = g_client_tag_rx.active_attempts;
+	int32_t prev_src = g_client_tag_rx.source_machine_index;
 
 	if (g_client_tag_rx.comp_buf)
 	{
@@ -2176,6 +2304,7 @@ static void forge_client_abort_rx(int mode)
 		g_client_tag_rx.comp_buf = NULL;
 	}
 	g_client_tag_rx.state = _forge_tag_rx_idle;
+	g_client_tag_rx.source_machine_index = -1;
 	g_client_tag_rx.hash = 0;
 	g_client_tag_rx.transfer_id = 0;
 	g_client_tag_rx.active_attempts = 0;
@@ -2193,11 +2322,21 @@ static void forge_client_abort_rx(int mode)
 		{
 			g_client_tag_rx.queue[g_client_tag_rx.queue_count] = prev_hash;
 			g_client_tag_rx.queue_attempts[g_client_tag_rx.queue_count] = prev_attempts;
+			g_client_tag_rx.queue_source_machine[g_client_tag_rx.queue_count] = prev_src;
 			g_client_tag_rx.queue_count++;
 		}
 		else
 		{
+			int ps_i;
 			forge_client_mark_hash_settled(prev_hash);
+			for (ps_i = 0; ps_i < FORGE_TAG_STREAM_MAX_SESSION_TAGS; ps_i++)
+			{
+				if (g_host_pending_client_spawns[ps_i].active &&
+					g_host_pending_client_spawns[ps_i].hash == prev_hash)
+				{
+					g_host_pending_client_spawns[ps_i].active = 0u;
+				}
+			}
 		}
 	}
 
@@ -2209,7 +2348,7 @@ static void forge_client_abort_rx(int mode)
 	}
 }
 
-static void forge_client_enqueue_tag_download(uint32_t hash)
+static void forge_enqueue_tag_download_from(uint32_t hash, int32_t source_machine_index)
 {
 	int i;
 
@@ -2234,8 +2373,14 @@ static void forge_client_enqueue_tag_download(uint32_t hash)
 	{
 		g_client_tag_rx.queue[g_client_tag_rx.queue_count] = hash;
 		g_client_tag_rx.queue_attempts[g_client_tag_rx.queue_count] = 0;
+		g_client_tag_rx.queue_source_machine[g_client_tag_rx.queue_count] = source_machine_index;
 		g_client_tag_rx.queue_count++;
 	}
+}
+
+static void forge_client_enqueue_tag_download(uint32_t hash)
+{
+	forge_enqueue_tag_download_from(hash, -1);
 }
 
 static int32_t forge_client_upsert_stream_proxy_instance(
@@ -2449,14 +2594,52 @@ static void forge_client_materialize_streamed_hash(
 				orig_network_objects_handle_changes(&re_change, 1);
 				existing_obj = forge_find_live_object_by_abs_index(obj_abs);
 			}
+			if (existing_obj == NONE && obj_abs >= 0 && obj_abs < FORGE_MAX_TRACKED_NET_OBJECTS && def_idx != NONE)
+			{
+				struct forge_distributed_object_change synth;
+				memset(&synth, 0, sizeof(synth));
+				synth.change = 0; /* _object_change_create */
+				synth.owner_player_index = (byte)NONE;
+				synth.forced_shader_permutation_index = (byte)NONE;
+				synth.object_index = ((long)1 << 16) | (obj_abs & 0xFFFF);
+				synth.definition_index = def_idx;
+				synth.owner_team_index = inst->team_designator;
+				synth.variant_number = NONE;
+				synth.position.x = inst->x;
+				synth.position.y = inst->y;
+				synth.position.z = inst->z;
+				forge_net_euler_to_vectors(inst->yaw, inst->pitch, inst->roll, &synth.forward, &synth.up);
+				orig_network_objects_handle_changes(&synth, 1);
+				existing_obj = forge_find_live_object_by_abs_index(obj_abs);
+			}
 			if (weap0_abs >= 0 && weap0_abs < FORGE_MAX_TRACKED_NET_OBJECTS &&
 				forge_find_live_object_by_abs_index(weap0_abs) == NONE &&
-				g_net_obj_has_deferred_create[weap0_abs] && weap0_def_idx != NONE)
+				weap0_def_idx != NONE)
 			{
-				struct forge_distributed_object_change re_weap = g_net_obj_deferred_create[weap0_abs];
-				g_net_obj_has_deferred_create[weap0_abs] = 0;
-				re_weap.definition_index = weap0_def_idx;
-				orig_network_objects_handle_changes(&re_weap, 1);
+				if (g_net_obj_has_deferred_create[weap0_abs])
+				{
+					struct forge_distributed_object_change re_weap = g_net_obj_deferred_create[weap0_abs];
+					g_net_obj_has_deferred_create[weap0_abs] = 0;
+					re_weap.definition_index = weap0_def_idx;
+					orig_network_objects_handle_changes(&re_weap, 1);
+				}
+				else
+				{
+					struct forge_distributed_object_change synth_w;
+					memset(&synth_w, 0, sizeof(synth_w));
+					synth_w.change = 0;
+					synth_w.owner_player_index = (byte)NONE;
+					synth_w.forced_shader_permutation_index = (byte)NONE;
+					synth_w.object_index = ((long)1 << 16) | (weap0_abs & 0xFFFF);
+					synth_w.definition_index = weap0_def_idx;
+					synth_w.owner_team_index = inst->team_designator;
+					synth_w.variant_number = NONE;
+					synth_w.position.x = inst->x;
+					synth_w.position.y = inst->y;
+					synth_w.position.z = inst->z;
+					forge_net_euler_to_vectors(inst->yaw, inst->pitch, inst->roll, &synth_w.forward, &synth_w.up);
+					orig_network_objects_handle_changes(&synth_w, 1);
+				}
 			}
 			if (existing_obj != NONE)
 			{
@@ -2658,16 +2841,30 @@ void forge_tag_stream_handle_message(
 
 	memcpy(&hdr, message, sizeof(hdr));
 
-	/* 1. Host handling a Client's solicited tag request */
+	/* 1. Host or Client handling a peer's solicited tag request */
 	if (hdr.type == _distributed_message_forge_tag_request)
 	{
 		struct forge_tag_request_packet req;
-		struct forge_host_client_tag_tx *tx;
+		struct forge_host_client_tag_tx *tx = NULL;
+		int is_server = (game_connection() == _game_connection_network_server);
+		int is_client = (game_connection() == _game_connection_network_client);
 		int slot;
 
-		if (game_connection() != _game_connection_network_server ||
-			machine_index < 0 || machine_index >= FORGE_MAX_CLIENT_MACHINES ||
-			size != sizeof(req))
+		if (size != sizeof(req))
+			return;
+		if (is_server)
+		{
+			if (machine_index < 0 || machine_index >= FORGE_MAX_CLIENT_MACHINES)
+				return;
+			tx = &g_host_tag_tx[machine_index];
+		}
+		else if (is_client)
+		{
+			if (machine_index != NONE)
+				return;
+			tx = &g_host_tag_tx[0];
+		}
+		else
 		{
 			return;
 		}
@@ -2675,7 +2872,6 @@ void forge_tag_stream_handle_message(
 		if (req.magic != FORGE_TAG_REQUEST_MAGIC || req.hash == 0u || req.transfer_id == 0u)
 			return;
 
-		tx = &g_host_tag_tx[machine_index];
 		if (tx->req_count >= FORGE_TAG_STREAM_MAX_CLIENT_REQS)
 			return;
 		if (tx->active && tx->transfer_id == req.transfer_id && tx->hash == req.hash)
@@ -2692,7 +2888,10 @@ void forge_tag_stream_handle_message(
 			miss.op = FORGE_TAG_STREAM_OP_MISS;
 			miss.hash = req.hash;
 			miss.transfer_id = req.transfer_id;
-			network_distributed_server_send_to_machine_reliably(machine_index, &miss, (word)sizeof(miss));
+			if (is_server)
+				network_distributed_server_send_to_machine_reliably(machine_index, &miss, (word)sizeof(miss));
+			else
+				network_distributed_client_send_reliably(&miss, (word)sizeof(miss));
 			return;
 		}
 
@@ -2707,16 +2906,33 @@ void forge_tag_stream_handle_message(
 		return;
 	}
 
-	/* 2. Client handling the Host's tag stream response */
+	/* 2. Client or Host handling a peer's tag stream response */
 	if (hdr.type == _distributed_message_forge_tag_stream)
 	{
 		uint32_t magic = 0;
 		uint8_t op = 0xFFu;
+		int is_server = (game_connection() == _game_connection_network_server);
+		int is_client = (game_connection() == _game_connection_network_client);
 
-		if (game_connection() != _game_connection_network_client ||
-			machine_index != NONE ||
-			!config_boolean("network.forge_tag_download") ||
+		if (!config_boolean("network.forge_tag_download") ||
 			g_client_tag_rx.strikes >= FORGE_TAG_STREAM_MAX_STRIKES)
+		{
+			return;
+		}
+		if (is_client)
+		{
+			if (machine_index != NONE || g_client_tag_rx.source_machine_index >= 0)
+				return;
+		}
+		else if (is_server)
+		{
+			if (machine_index < 0 || machine_index >= FORGE_MAX_CLIENT_MACHINES ||
+				machine_index != (long)g_client_tag_rx.source_machine_index)
+			{
+				return;
+			}
+		}
+		else
 		{
 			return;
 		}
@@ -2905,6 +3121,7 @@ void forge_tag_stream_handle_message(
 				g_client_tag_rx.comp_buf = NULL;
 				forge_client_mark_hash_settled(fin_hash);
 				g_client_tag_rx.state = _forge_tag_rx_idle;
+				g_client_tag_rx.source_machine_index = -1;
 				g_client_tag_rx.hash = 0;
 				g_client_tag_rx.transfer_id = 0;
 				g_client_tag_rx.active_attempts = 0;
@@ -2922,6 +3139,15 @@ void forge_tag_stream_handle_message(
 
 				if (installed_def == NONE)
 				{
+					int ps_i;
+					for (ps_i = 0; ps_i < FORGE_TAG_STREAM_MAX_SESSION_TAGS; ps_i++)
+					{
+						if (g_host_pending_client_spawns[ps_i].active &&
+							g_host_pending_client_spawns[ps_i].hash == fin_hash)
+						{
+							g_host_pending_client_spawns[ps_i].active = 0u;
+						}
+					}
 					g_client_tag_rx.strikes++;
 					if (g_client_tag_rx.strikes >= FORGE_TAG_STREAM_MAX_STRIKES)
 						g_client_tag_rx.queue_count = 0;
@@ -2929,7 +3155,65 @@ void forge_tag_stream_handle_message(
 				}
 
 				g_client_tag_rx.downloaded_count++;
-				forge_client_materialize_streamed_hash(fin_hash, fin_grp, fin_path, installed_def, actual_grp);
+				if (is_server)
+				{
+					/* Host finished receiving a custom tag from a Client: invalidate any prior missing-cache entry
+					 * so the Host can re-serve this tag to other Clients, and spawn all pending Client instances! */
+					int cs_i, ps_i;
+					for (cs_i = 0; cs_i < FORGE_TAG_STREAM_MAX_SESSION_TAGS; cs_i++)
+					{
+						if (g_host_tag_cache[cs_i].valid &&
+							g_host_tag_cache[cs_i].missing &&
+							g_host_tag_cache[cs_i].hash == fin_hash)
+						{
+							g_host_tag_cache[cs_i].valid = 0;
+							g_host_tag_cache[cs_i].missing = 0;
+						}
+					}
+					for (ps_i = 0; ps_i < FORGE_TAG_STREAM_MAX_SESSION_TAGS; ps_i++)
+					{
+						struct forge_host_pending_client_spawn *ps = &g_host_pending_client_spawns[ps_i];
+						int32_t spawned_idx;
+						if (!ps->active || ps->hash != fin_hash)
+							continue;
+						ps->active = 0u;
+						spawned_idx = forge_3d_spawn_object_at(
+							fin_grp,
+							fin_path,
+							4,
+							ps->x, ps->y, ps->z,
+							(float)ps->yaw_cr / 100.0f,
+							(float)ps->pitch_cr / 100.0f,
+							(float)ps->roll_cr / 100.0f,
+							ps->team,
+							1);
+						if (spawned_idx >= 0 && spawned_idx < FORGE_MAX_LIVE_INSTANCES &&
+							g_pending_slot_props[spawned_idx].valid)
+						{
+							struct forge_pending_slot_props const *pp = &g_pending_slot_props[spawned_idx];
+							char relay_props[64];
+							forge_apply_props_to_live_slot(
+								spawned_idx,
+								pp->team_designator,
+								pp->gametype_flags,
+								pp->physics_mode,
+								pp->respawn_timer_sec,
+								pp->ai_order,
+								pp->group_id,
+								pp->light_color_preset,
+								pp->light_intensity_preset,
+								pp->light_radius_preset);
+							g_pending_slot_props[spawned_idx].valid = 0;
+							forge_format_props_packet(relay_props, sizeof(relay_props), spawned_idx, &g_forge.live_instances[spawned_idx]);
+							forge_broadcast_packet_to_clients(relay_props, -1);
+						}
+						forge_server_mark_dirty();
+					}
+				}
+				else
+				{
+					forge_client_materialize_streamed_hash(fin_hash, fin_grp, fin_path, installed_def, actual_grp);
+				}
 			}
 			return;
 		}
@@ -2943,42 +3227,49 @@ void forge_tag_stream_handle_message(
 
 static void forge_tag_stream_tick(unsigned long now)
 {
-	if (game_connection() == _game_connection_network_client)
+	int is_client = (game_connection() == _game_connection_network_client);
+	int is_server = (game_connection() == _game_connection_network_server);
+
+	if (!is_client && !is_server)
+		return;
+
+	/* 1. Receiver state machine (runs on Client for Host->Client tags, and on Host for Client->Host tags) */
+	if (!config_boolean("network.forge_tag_download") ||
+		g_client_tag_rx.strikes >= FORGE_TAG_STREAM_MAX_STRIKES)
 	{
-		if (!config_boolean("network.forge_tag_download") ||
-			g_client_tag_rx.strikes >= FORGE_TAG_STREAM_MAX_STRIKES)
-		{
-			if (g_client_tag_rx.state != _forge_tag_rx_idle)
-				forge_client_abort_rx(0);
-			g_client_tag_rx.queue_count = 0;
-			return;
-		}
-
 		if (g_client_tag_rx.state != _forge_tag_rx_idle)
-		{
-			if (now - g_client_tag_rx.last_progress_ms > FORGE_TAG_STREAM_STALL_TIMEOUT_MS)
-				forge_client_abort_rx(2);
-			else
-				return;
-		}
-
+			forge_client_abort_rx(0);
+		g_client_tag_rx.queue_count = 0;
+	}
+	else if (g_client_tag_rx.state != _forge_tag_rx_idle)
+	{
+		if (now - g_client_tag_rx.last_progress_ms > FORGE_TAG_STREAM_STALL_TIMEOUT_MS)
+			forge_client_abort_rx(2);
+	}
+	else
+	{
 		while (g_client_tag_rx.queue_count > 0 &&
 			   g_client_tag_rx.downloaded_count < FORGE_TAG_STREAM_MAX_SESSION_TAGS)
 		{
 			uint32_t next_hash = g_client_tag_rx.queue[0];
 			uint8_t next_attempts = g_client_tag_rx.queue_attempts[0];
+			int32_t next_src = g_client_tag_rx.queue_source_machine[0];
 			struct forge_tag_request_packet req;
 			uint32_t tid;
+			boolean sent_ok;
 			int q;
 
 			for (q = 1; q < g_client_tag_rx.queue_count; q++)
 			{
 				g_client_tag_rx.queue[q - 1] = g_client_tag_rx.queue[q];
 				g_client_tag_rx.queue_attempts[q - 1] = g_client_tag_rx.queue_attempts[q];
+				g_client_tag_rx.queue_source_machine[q - 1] = g_client_tag_rx.queue_source_machine[q];
 			}
 			g_client_tag_rx.queue_count--;
 
 			if (forge_client_is_hash_settled(next_hash))
+				continue;
+			if (is_server && (next_src < 0 || next_src >= FORGE_MAX_CLIENT_MACHINES || !g_host_machine_known[next_src]))
 				continue;
 
 			g_client_tag_rx.next_transfer_seq++;
@@ -2992,21 +3283,27 @@ static void forge_tag_stream_tick(unsigned long now)
 			req.hash = next_hash;
 			req.transfer_id = tid;
 
-			if (!network_distributed_client_send_reliably(&req, (word)sizeof(req)))
+			sent_ok = is_server
+				? network_distributed_server_send_to_machine_reliably(next_src, &req, (word)sizeof(req))
+				: network_distributed_client_send_reliably(&req, (word)sizeof(req));
+			if (!sent_ok)
 			{
 				/* Reliable stream busy: put back at head of queue and retry next tick */
 				for (q = g_client_tag_rx.queue_count; q > 0; q--)
 				{
 					g_client_tag_rx.queue[q] = g_client_tag_rx.queue[q - 1];
 					g_client_tag_rx.queue_attempts[q] = g_client_tag_rx.queue_attempts[q - 1];
+					g_client_tag_rx.queue_source_machine[q] = g_client_tag_rx.queue_source_machine[q - 1];
 				}
 				g_client_tag_rx.queue[0] = next_hash;
 				g_client_tag_rx.queue_attempts[0] = next_attempts;
+				g_client_tag_rx.queue_source_machine[0] = next_src;
 				g_client_tag_rx.queue_count++;
 				break;
 			}
 
 			g_client_tag_rx.state = _forge_tag_rx_wait_offer;
+			g_client_tag_rx.source_machine_index = next_src;
 			g_client_tag_rx.hash = next_hash;
 			g_client_tag_rx.transfer_id = tid;
 			g_client_tag_rx.active_attempts = (uint8_t)(next_attempts + 1u);
@@ -3014,14 +3311,15 @@ static void forge_tag_stream_tick(unsigned long now)
 			break;
 		}
 	}
-	else if (game_connection() == _game_connection_network_server)
+
+	/* 2. Transmitter state machine (runs on Host for all client machines, and on Client at slot 0 when uploading to Host) */
 	{
-		int m;
-		for (m = 0; m < FORGE_MAX_CLIENT_MACHINES; m++)
+		int m, max_m = is_server ? FORGE_MAX_CLIENT_MACHINES : 1;
+		for (m = 0; m < max_m; m++)
 		{
 			struct forge_host_client_tag_tx *tx = &g_host_tag_tx[m];
 			struct forge_host_cached_tag_bundle const *cb;
-			long backlog;
+			long backlog = 0;
 			unsigned long elapsed;
 			int sent_this_tick = 0;
 
@@ -3039,12 +3337,15 @@ static void forge_tag_stream_tick(unsigned long now)
 				continue;
 			}
 
-			/* Check per-client outgoing reliable queue so streaming never overflows the 256 KB engine buffer */
-			backlog = network_distributed_server_machine_reliable_backlog(m);
-			if (backlog == NONE)
+			if (is_server)
 			{
-				tx->active = 0;
-				continue;
+				/* Check per-client outgoing reliable queue so streaming never overflows the 256 KB engine buffer */
+				backlog = network_distributed_server_machine_reliable_backlog(m);
+				if (backlog == NONE)
+				{
+					tx->active = 0;
+					continue;
+				}
 			}
 
 			elapsed = now - tx->last_send_ms;
@@ -3064,6 +3365,7 @@ static void forge_tag_stream_tick(unsigned long now)
 			if (!tx->offer_sent)
 			{
 				struct forge_tag_stream_offer_packet offer;
+				boolean offer_ok;
 
 				if (tx->byte_budget <= 0)
 					continue;
@@ -3082,7 +3384,10 @@ static void forge_tag_stream_tick(unsigned long now)
 				snprintf(offer.tag_path, sizeof(offer.tag_path), "%s", cb->tag_path);
 				snprintf(offer.display_name, sizeof(offer.display_name), "%s", cb->display_name);
 
-				if (!network_distributed_server_send_to_machine_reliably(m, &offer, (word)sizeof(offer)))
+				offer_ok = is_server
+					? network_distributed_server_send_to_machine_reliably(m, &offer, (word)sizeof(offer))
+					: network_distributed_client_send_reliably(&offer, (word)sizeof(offer));
+				if (!offer_ok)
 					continue;
 				tx->offer_sent = 1;
 				tx->byte_budget -= (int32_t)sizeof(offer);
@@ -3099,6 +3404,7 @@ static void forge_tag_stream_tick(unsigned long now)
 				uint32_t rem = cb->compressed_size - src_off;
 				uint16_t plen = (rem > FORGE_TAG_STREAM_CHUNK_BYTES) ? (uint16_t)FORGE_TAG_STREAM_CHUNK_BYTES : (uint16_t)rem;
 				word wire_sz = (word)(offsetof(struct forge_tag_stream_chunk_packet, payload) + (size_t)plen);
+				boolean chunk_ok;
 
 				memset(&chunk, 0, offsetof(struct forge_tag_stream_chunk_packet, payload));
 				forge_tag_stream_fill_header(&chunk.header, _distributed_message_forge_tag_stream, wire_sz);
@@ -3110,7 +3416,10 @@ static void forge_tag_stream_tick(unsigned long now)
 				chunk.payload_len = plen;
 				memcpy(chunk.payload, cb->comp_bytes + src_off, (size_t)plen);
 
-				if (!network_distributed_server_send_to_machine_reliably(m, &chunk, wire_sz))
+				chunk_ok = is_server
+					? network_distributed_server_send_to_machine_reliably(m, &chunk, wire_sz)
+					: network_distributed_client_send_reliably(&chunk, wire_sz);
+				if (!chunk_ok)
 					break;
 				tx->next_chunk++;
 				sent_this_tick++;
@@ -3130,8 +3439,11 @@ int forge_network_get_tag_download_status(char *out_text, size_t out_sz)
 		return 0;
 	out_text[0] = '\0';
 
-	if (game_connection() != _game_connection_network_client)
+	if (game_connection() != _game_connection_network_client &&
+		game_connection() != _game_connection_network_server)
+	{
 		return 0;
+	}
 
 	if (g_client_tag_rx.state == _forge_tag_rx_receiving && g_client_tag_rx.chunk_count > 0)
 	{
@@ -3150,7 +3462,7 @@ int forge_network_get_tag_download_status(char *out_text, size_t out_sz)
 	}
 	if (g_client_tag_rx.state == _forge_tag_rx_wait_offer || g_client_tag_rx.queue_count > 0)
 	{
-		snprintf(out_text, out_sz, "REQUESTING CUSTOM TAG FROM HOST... (%d remaining)",
+		snprintf(out_text, out_sz, "REQUESTING CUSTOM TAG... (%d remaining)",
 			g_client_tag_rx.queue_count + (g_client_tag_rx.state == _forge_tag_rx_wait_offer ? 1 : 0));
 		return 1;
 	}

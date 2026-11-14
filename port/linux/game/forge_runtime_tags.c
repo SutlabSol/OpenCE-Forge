@@ -1000,6 +1000,7 @@ static int is_excluded_weapon_or_equipment_tag(char const *tag_path)
 		"gravity rifle", "gravity_rifle", "full-spectrum", "full spectrum", "full_spectrum",
 		"plasma_cannon", "plasma cannon", "fuel rod", "fuel_rod", "double speed", "double_speed",
 		"target_laser", "target laser", "energy sword", "energy_sword",
+		"flamethrower", "flame_thrower", "flame thrower",
 		"\\flag", "flag\\", "\\ball", "ball\\"
 	};
 	if (!tag_path || !tag_path[0])
@@ -1047,16 +1048,16 @@ static int compute_catalog_entry_allowed(struct forge_catalog_entry const *entry
 			return 1;
 		return is_allowed_forge_light_or_device_tag(entry->group_tag, entry->tag_path);
 	}
-	/* Allow all custom tag cache entries (source_cache_id == 2) and injected donor map tags (source_cache_id == 1) */
-	if (entry->source_cache_id == 2 || entry->source_cache_id == 1)
-		return 1;
-	/* Exclude gravity rifle, full spectrum vision, fuel rod (plasma_cannon), and double speed */
+	/* Exclude gravity rifle, flamethrower, full spectrum vision, fuel rod (plasma_cannon), and double speed */
 	if ((entry->group_tag == 'weap' || entry->group_tag == 'eqip' ||
 	     entry->category == _forge_cat_weapons || entry->category == _forge_cat_equipment) &&
 	    is_excluded_weapon_or_equipment_tag(entry->tag_path))
 	{
 		return 0;
 	}
+	/* Allow all custom tag cache entries (source_cache_id == 2) and injected donor map tags (source_cache_id == 1) */
+	if (entry->source_cache_id == 2 || entry->source_cache_id == 1)
+		return 1;
 	/* Exclude all emitters, particle effects, point lights, lens flares, and device scenery props */
 	if (entry->group_tag == 'scen' && is_excluded_scenery_or_effect_tag(entry->tag_path))
 	{
@@ -3371,25 +3372,36 @@ static void patch_forge_device_and_light_tag_runtime(long tag_idx, uint32_t grp,
 	(void)tag_path;
 	if (tag_idx == NONE)
 		return;
-	if (grp != 'scen' && grp != 'mach' && grp != 'lifi' && grp != 'ctrl')
+	if (grp != 'scen' && grp != 'mach' && grp != 'lifi' && grp != 'ctrl' &&
+		grp != 'weap' && grp != 'eqip' && grp != 'vehi' && grp != 'bipd')
 		return;
 
 	obuf = (uint8_t *)tag_get((long)grp, tag_idx);
 	if (!obuf)
 		return;
 
-	/* Ensure scenery, devices, and light fixtures have generous bounding and render radii so Forge raycasting
-	 * and long-distance frustum/LOD visibility never cull custom scenery early */
-	if (*(float const *)(obuf + 0x04u) < 1.5f)
-		*(float *)(obuf + 0x04u) = 1.5f;
-	if (*(float const *)(obuf + 0x104u) < 8.0f)
-		*(float *)(obuf + 0x104u) = 8.0f;
+	/* Ensure scenery, devices, weapons, equipment, and light fixtures have valid bounding and render radii so Forge raycasting
+	 * and long-distance frustum/LOD visibility never cull custom items early */
+	if (grp == 'weap' || grp == 'eqip')
+	{
+		if (*(float const *)(obuf + 0x04u) < 0.6f)
+			*(float *)(obuf + 0x04u) = 0.6f;
+		if (*(float const *)(obuf + 0x104u) < 4.0f)
+			*(float *)(obuf + 0x104u) = 4.0f;
+	}
+	else if (grp == 'scen' || grp == 'mach' || grp == 'lifi' || grp == 'ctrl')
+	{
+		if (*(float const *)(obuf + 0x04u) < 1.5f)
+			*(float *)(obuf + 0x04u) = 1.5f;
+		if (*(float const *)(obuf + 0x104u) < 8.0f)
+			*(float *)(obuf + 0x104u) = 8.0f;
+	}
 	if (*(float const *)(obuf + 0x104u) < *(float const *)(obuf + 0x04u) * 2.0f)
 		*(float *)(obuf + 0x104u) = *(float const *)(obuf + 0x04u) * 2.0f;
 
 	/* Patch the object's model ('mode'/'mod2') LOD cutoffs and permutation geometry_indices[0..4]
-	 * so custom scenery items with missing low-LOD geometries or positive super_low pixel cutoffs
-	 * render across the entire map just like base-game scenery! */
+	 * so custom items with missing low-LOD geometries or positive super_low pixel cutoffs
+	 * render across the entire map just like base-game objects! */
 	model_idx = *(int32_t const *)(obuf + 0x34u);
 	if (model_idx != NONE)
 	{
@@ -3399,11 +3411,32 @@ static void patch_forge_device_and_light_tag_runtime(long tag_idx, uint32_t grp,
 		if (mbuf)
 		{
 			float *cutoffs = (float *)(mbuf + 0x08u);
+			int32_t model_node_cnt = *(int32_t const *)(mbuf + 0xB8u);
+			int32_t antr_idx = *(int32_t const *)(obuf + 0x3Cu);
 			int32_t reg_cnt = *(int32_t const *)(mbuf + 0xC4u);
 			uint8_t *reg_base = *(uint8_t *const *)(mbuf + 0xC8u);
 			int32_t geom_cnt = *(int32_t const *)(mbuf + 0xD0u);
 			uint8_t *geom_base = *(uint8_t *const *)(mbuf + 0xD4u);
 			int32_t r, p, lv;
+
+			if (antr_idx != NONE && (grp == 'scen' || grp == 'eqip' || grp == 'weap'))
+			{
+				uint8_t const *abuf = (uint8_t const *)tag_get('antr', antr_idx);
+				if (!abuf)
+				{
+					*(int32_t *)(obuf + 0x3Cu) = NONE;
+				}
+				else
+				{
+					int32_t antr_node_cnt = *(int32_t const *)(abuf + 0x54u);
+					int32_t antr_anim_cnt = *(int32_t const *)(abuf + 0x74u);
+					if (antr_anim_cnt <= 0 ||
+						(antr_node_cnt > 0 && model_node_cnt > 0 && antr_node_cnt != model_node_cnt))
+					{
+						*(int32_t *)(obuf + 0x3Cu) = NONE;
+					}
+				}
+			}
 
 			if (cutoffs[0] > cutoffs[4] && cutoffs[4] >= 0.0f)
 			{
@@ -3511,8 +3544,7 @@ static long find_native_or_mp_variant_tag(uint32_t group_tag, char const *tag_pa
 	{
 		if (group_tag == 'vehi')
 			patch_vehicle_tag_for_player_driving(idx, tag_path);
-		else if (group_tag == 'scen' || group_tag == 'mach' || group_tag == 'lifi' || group_tag == 'ctrl')
-			patch_forge_device_and_light_tag_runtime(idx, group_tag, tag_path);
+		patch_forge_device_and_light_tag_runtime(idx, group_tag, tag_path);
 		return idx;
 	}
 
@@ -3550,6 +3582,9 @@ static struct tag_schema_group const *forge_runtime_schema_group_get(uint32_t gr
 {
 	struct tag_schema_group const *const *list;
 	struct tag_schema_group const *group;
+
+	if (group_tag == 'scex')
+		group_tag = 'schi';
 
 	if (group_tag == 'mod2')
 	{
@@ -3641,7 +3676,7 @@ static void xbox_visit_tag_index(struct xbox_runtime_closure *cl, int32_t abs_id
 			long base_cnt = (long)forge_get_base_map_tag_count();
 			if ((base_cnt > 0 && (ex & 0xFFFF) >= base_cnt) ||
 				(!custom_edition_cache_tags_loaded() && !mcc_cache_tags_loaded() &&
-				 grp != 'bitm' && grp != 'mode' && grp != 'snd!' && grp != 'lsnd' &&
+				 grp != 'bitm' && grp != 'mode' && grp != 'antr' && grp != 'coll' &&
 				 grp != 'shdr' && grp != 'senv' && grp != 'soso' && grp != 'sotr' &&
 				 grp != 'schi' && grp != 'scex' && grp != 'swat' && grp != 'sgla' &&
 				 grp != 'smet' && grp != 'spla'))
@@ -4380,6 +4415,7 @@ static long load_native_xbox_tag_from_source(
 		{
 			struct sound_definition *sdef = (struct sound_definition *)root_buf;
 			int pr_i, pm_i;
+			int valid_pr_count = 0;
 			sdef->compression = 1; /* _sound_compression_xbox_adpcm */
 			if (sdef->encoding != 1)
 				sdef->sample_rate = 0; /* mono Xbox ADPCM plays at 22050 Hz */
@@ -4394,6 +4430,7 @@ static long load_native_xbox_tag_from_source(
 			for (pr_i = 0; pr_i < sdef->pitch_ranges.count && sdef->pitch_ranges.address; pr_i++)
 			{
 				struct sound_pitch_range *pr = (struct sound_pitch_range *)((uint8_t *)sdef->pitch_ranges.address + (size_t)pr_i * sizeof(struct sound_pitch_range));
+				int valid_perm_count = 0;
 				pr->played_permutation_mask = 0xFFFFFFFFu;
 				pr->previous_permutation_index = NONE;
 				pr->forced_permutation_index = NONE;
@@ -4414,7 +4451,11 @@ static long load_native_xbox_tag_from_source(
 						{
 							if (mem_image != NULL)
 							{
-								if ((uint64_t)(uint32_t)perm->samples.file_offset + (uint64_t)(uint32_t)perm->samples.size <= (uint64_t)mem_image_size)
+								/* MCC sound sample offsets in decompressed maps that are smaller than 2048 + tag_sz
+								 * are external sound-bank offsets (not decompressed cache file offsets) and would
+								 * read tag metadata as raw Xbox ADPCM audio, corrupting the sound mixer. */
+								if ((uint32_t)perm->samples.file_offset >= 2048u + tag_sz &&
+									(uint64_t)(uint32_t)perm->samples.file_offset + (uint64_t)(uint32_t)perm->samples.size <= (uint64_t)mem_image_size)
 								{
 									memcpy(sbuf, mem_image + (uint32_t)perm->samples.file_offset, (size_t)perm->samples.size);
 									s_ok = 1;
@@ -4431,6 +4472,7 @@ static long load_native_xbox_tag_from_source(
 							perm->samples.address = sbuf;
 							perm->samples.file_offset = 0;
 							forge_register_dyn_sound_perm(perm);
+							valid_perm_count++;
 						}
 						else
 						{
@@ -4442,6 +4484,20 @@ static long load_native_xbox_tag_from_source(
 						perm->samples.size = 0;
 					}
 				}
+				if (valid_perm_count == 0)
+				{
+					pr->permutations.count = 0;
+					pr->permutations.address = NULL;
+				}
+				else
+				{
+					valid_pr_count++;
+				}
+			}
+			if (valid_pr_count == 0)
+			{
+				sdef->pitch_ranges.count = 0;
+				sdef->pitch_ranges.address = NULL;
 			}
 		}
 		else if (grp == 'mode')
@@ -4671,8 +4727,7 @@ static long load_native_xbox_tag_from_source(
 	{
 		if (req_group == 'vehi')
 			patch_vehicle_tag_for_player_driving(root_handle, req_path);
-		else if (req_group == 'scen' || req_group == 'mach' || req_group == 'lifi' || req_group == 'ctrl')
-			patch_forge_device_and_light_tag_runtime(root_handle, req_group, req_path);
+		patch_forge_device_and_light_tag_runtime(root_handle, req_group, req_path);
 		if (s_dyn_tags.count < FORGE_MAX_DYNAMIC_TAGS)
 		{
 			struct forge_dynamic_tag_entry *entry = &s_dyn_tags.entries[s_dyn_tags.count++];
@@ -5436,8 +5491,7 @@ static long install_faber_bundle_from_source(
 	{
 		if (req_group == 'vehi')
 			patch_vehicle_tag_for_player_driving(root_handle, req_path);
-		else if (req_group == 'scen' || req_group == 'mach' || req_group == 'lifi' || req_group == 'ctrl')
-			patch_forge_device_and_light_tag_runtime(root_handle, req_group, req_path);
+		patch_forge_device_and_light_tag_runtime(root_handle, req_group, req_path);
 		if (s_dyn_tags.count < FORGE_MAX_DYNAMIC_TAGS)
 		{
 			struct forge_dynamic_tag_entry *d_entry = &s_dyn_tags.entries[s_dyn_tags.count++];
@@ -9305,6 +9359,12 @@ int forge_ui_open_map_for_tag_browser(char const *map_path)
 		s_map_browser.xbox_inst_off = 0x28u;
 		s_map_browser.xbox_tag_count = tag_count;
 		s_map_browser.mcc_rt = mcc_forge_browser_open(fp, map_path, tbuf, tag_sz);
+		for (i = 0; i < tag_count; i++)
+		{
+			uint32_t io = s_map_browser.xbox_inst_off + (uint32_t)i * 32u;
+			if (*(uint32_t const *)(tbuf + io + 0x00) == 'scex')
+				*(uint32_t *)(tbuf + io + 0x00) = 'schi';
+		}
 
 		for (c = 0; c < FORGE_BROWSER_NUM_CATS; c++)
 		{
@@ -10033,6 +10093,11 @@ static int extract_xbox_map_tag_to_vault(
 										conv_sz,
 										(uint32_t *)(perm_raw + 72u));
 								}
+								else
+								{
+									*(int32_t *)(perm_raw + 64u) = 0;
+									*(uint32_t *)(perm_raw + 72u) = 0;
+								}
 								free(conv_snd);
 							}
 							else
@@ -10117,7 +10182,7 @@ static int extract_xbox_map_tag_to_vault(
 						memcpy(part_prefix, wire, 0x20u);
 						memset(dst_part, 0, 104u);
 						memcpy(dst_part, part_prefix, 0x20u);
-						*(uint32_t *)dst_part &= ~2u;
+						*(uint32_t *)dst_part &= ~3u;
 						if (*(uint16_t const *)(dst_part + 4u) != 0xFFFFu &&
 							shdr_cnt > 0 && *(uint16_t const *)(dst_part + 4u) >= (uint16_t)shdr_cnt)
 						{

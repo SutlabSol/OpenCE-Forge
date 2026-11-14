@@ -2115,10 +2115,51 @@ static void forge_ensure_default_object_edit_entry(struct forge_live_instance *i
 	}
 }
 
-static int32_t adopt_default_scenario_object(long object_index)
+static int forge_is_non_editable_player_or_dropped_object(long object_index)
 {
 	struct object_datum *obj;
 	struct unit_datum *unit;
+	struct item_datum *item;
+	int32_t i;
+
+	obj = forge_valid_object_get(object_index);
+	if (!obj)
+		return 1;
+
+	/* Player-controlled bipeds are never editable */
+	unit = (struct unit_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_biped);
+	if (unit && unit->unit.player_index != NONE)
+		return 1;
+
+	/* Weapons or grenades dropped by a player or unit (weapon drop or death grenades) cannot be picked up */
+	item = (struct item_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_item);
+	if (item && (item->item.ignore_object_index != NONE || item->object.owner_player_index != NONE))
+		return 1;
+
+	/* Garbage chunks and projectiles cannot be picked up */
+	if (obj->object.type == _object_type_garbage || obj->object.type == _object_type_projectile)
+		return 1;
+
+	/* Check if already a Forge-managed live instance (e.g. a Forge-spawned AI biped) */
+	for (i = 0; i < g_forge.live_instance_count; i++)
+	{
+		if (g_forge.live_instances[i].active &&
+			g_forge.live_instances[i].object_index == object_index)
+		{
+			return 0;
+		}
+	}
+
+	/* Any other biped (dead player bodies, dead unit corpses) cannot be picked up or adopted */
+	if (unit != NULL)
+		return 1;
+
+	return 0;
+}
+
+static int32_t adopt_default_scenario_object(long object_index)
+{
+	struct object_datum *obj;
 	long def_idx;
 	uint32_t grp;
 	char const *tname;
@@ -2129,9 +2170,8 @@ static int32_t adopt_default_scenario_object(long object_index)
 	if (!obj)
 		return -1;
 
-	/* Never adopt a player's controlled biped */
-	unit = (struct unit_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_biped);
-	if (unit && unit->unit.player_index != NONE)
+	/* Never adopt a player's controlled biped, dead body, or player-dropped weapon/grenade */
+	if (forge_is_non_editable_player_or_dropped_object(object_index))
 		return -1;
 
 	/* Check if already in live_instances */
@@ -8290,8 +8330,12 @@ void forge_3d_update(float dt)
 				g_forge.ray_hit_y = coll.point.y;
 				g_forge.ray_hit_z = coll.point.z;
 				g_forge.hovered_object_index = (coll.type == _collision_result_object) ? coll.object_index : NONE;
-				if (g_forge.hovered_object_index == local_unit)
+				if (g_forge.hovered_object_index == local_unit ||
+					(g_forge.hovered_object_index != NONE &&
+					 forge_is_non_editable_player_or_dropped_object(g_forge.hovered_object_index)))
+				{
 					g_forge.hovered_object_index = NONE;
+				}
 				if (g_forge.hovered_object_index != NONE)
 				{
 					direct_obj_hit = 1;
@@ -8320,7 +8364,6 @@ void forge_3d_update(float dt)
 				while ((obj = object_iterator_next(&iter)) != NULL)
 				{
 					long oidx = iter.index;
-					struct unit_datum *u;
 					float vx, vy, vz, cam_d2, dist_along, px, py, pz, perp_d2, hit_dx, hit_dy, hit_dz, hit_d2;
 					float cand_score = 999.0f;
 
@@ -8328,8 +8371,7 @@ void forge_3d_update(float dt)
 						continue;
 					if (obj->object.parent_object_index != NONE)
 						continue;
-					u = (struct unit_datum *)object_try_and_get_and_verify_type(oidx, _object_mask_biped);
-					if (u && u->unit.player_index != NONE)
+					if (forge_is_non_editable_player_or_dropped_object(oidx))
 						continue;
 
 					vx = obj->object.position.x - g_forge.cam_x;
