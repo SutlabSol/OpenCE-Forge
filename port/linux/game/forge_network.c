@@ -408,6 +408,29 @@ static struct forge_catalog_entry const *forge_find_catalog_entry_by_hash(uint32
 			}
 		}
 	}
+	/* Fallback 3: check stock Xbox donor credits database (OpenCE Forge/credits.md) so late-joiners and peers
+	 * can resolve any stock Xbox campaign/MP tag (e.g. Pelican from b30.map) directly from their local maps/ folder! */
+	{
+		uint32_t cred_grp = 0;
+		char cred_path[128];
+		if (forge_find_credits_tag_by_hash(hash, &cred_grp, cred_path, sizeof(cred_path)) && cred_path[0])
+		{
+			memset(&s_fallback_entry, 0, sizeof(s_fallback_entry));
+			s_fallback_entry.group_tag = cred_grp;
+			snprintf(s_fallback_entry.tag_path, sizeof(s_fallback_entry.tag_path), "%s", cred_path);
+			s_fallback_entry.source_cache_id = 1;
+			if (g_forge.catalog_count < FORGE_MAX_CATALOG_ENTRIES)
+			{
+				struct forge_catalog_entry *ne = &g_forge.catalog[g_forge.catalog_count++];
+				memset(ne, 0, sizeof(*ne));
+				ne->group_tag = cred_grp;
+				snprintf(ne->tag_path, sizeof(ne->tag_path), "%s", cred_path);
+				ne->source_cache_id = 1;
+				return ne;
+			}
+			return &s_fallback_entry;
+		}
+	}
 	return NULL;
 }
 
@@ -1584,7 +1607,7 @@ static void forge_client_handle_host_spawn(
 			synth.change = 0; /* _object_change_create */
 			synth.owner_player_index = (byte)NONE;
 			synth.forced_shader_permutation_index = (byte)NONE;
-			synth.object_index = ((long)1 << 16) | (obj_abs & 0xFFFF);
+			synth.object_index = (long)((0x8001u << 16) | (uint32_t)(obj_abs & 0xFFFF));
 			synth.definition_index = def_idx;
 			synth.owner_team_index = team_designator;
 			synth.variant_number = NONE;
@@ -1614,7 +1637,7 @@ static void forge_client_handle_host_spawn(
 				synth_w.change = 0;
 				synth_w.owner_player_index = (byte)NONE;
 				synth_w.forced_shader_permutation_index = (byte)NONE;
-				synth_w.object_index = ((long)1 << 16) | (weap0_abs & 0xFFFF);
+				synth_w.object_index = (long)((0x8001u << 16) | (uint32_t)(weap0_abs & 0xFFFF));
 				synth_w.definition_index = weap0_def_idx;
 				synth_w.owner_team_index = team_designator;
 				synth_w.variant_number = NONE;
@@ -2601,7 +2624,7 @@ static void forge_client_materialize_streamed_hash(
 				synth.change = 0; /* _object_change_create */
 				synth.owner_player_index = (byte)NONE;
 				synth.forced_shader_permutation_index = (byte)NONE;
-				synth.object_index = ((long)1 << 16) | (obj_abs & 0xFFFF);
+				synth.object_index = (long)((0x8001u << 16) | (uint32_t)(obj_abs & 0xFFFF));
 				synth.definition_index = def_idx;
 				synth.owner_team_index = inst->team_designator;
 				synth.variant_number = NONE;
@@ -2630,7 +2653,7 @@ static void forge_client_materialize_streamed_hash(
 					synth_w.change = 0;
 					synth_w.owner_player_index = (byte)NONE;
 					synth_w.forced_shader_permutation_index = (byte)NONE;
-					synth_w.object_index = ((long)1 << 16) | (weap0_abs & 0xFFFF);
+					synth_w.object_index = (long)((0x8001u << 16) | (uint32_t)(weap0_abs & 0xFFFF));
 					synth_w.definition_index = weap0_def_idx;
 					synth_w.owner_team_index = inst->team_designator;
 					synth_w.variant_number = NONE;

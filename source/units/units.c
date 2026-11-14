@@ -2827,6 +2827,8 @@ void unit_died(
 		object_set_garbage(unit_index, TRUE);
 		if (unit->unit.player_index != NONE)
 		{
+			/* port: preserve owner_player_index on dead player corpses so Forge Monitor mode never grabs them */
+			unit->object.owner_player_index = unit->unit.player_index;
 			player_died(unit->unit.player_index);
 			unit->unit.player_index = NONE;
 		}
@@ -12223,6 +12225,13 @@ static void unit_drop_item(
 		}
 
 		item->item.ignore_object_index = unit_index;
+		/* port: mark items (weapons/grenades/equipment) dropped by a unit so Forge Monitor mode cannot grab them,
+		 * while Spartan players can still pick them up or switch to them normally */
+		SET_FLAG(item->item.flags, _item_belongs_to_player_bit, TRUE);
+		if (unit->unit.player_index != NONE)
+			item->object.owner_player_index = unit->unit.player_index;
+		else if (unit->object.owner_player_index != NONE)
+			item->object.owner_player_index = unit->object.owner_player_index;
 		item_accelerate(item_index, &item_velocity, FALSE);
 	}
 

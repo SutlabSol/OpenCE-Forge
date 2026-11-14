@@ -2131,9 +2131,11 @@ static int forge_is_non_editable_player_or_dropped_object(long object_index)
 	if (unit && unit->unit.player_index != NONE)
 		return 1;
 
-	/* Weapons or grenades dropped by a player or unit (weapon drop or death grenades) cannot be picked up */
+	/* Weapons or grenades dropped by a player or unit (weapon drop or death grenades) cannot be picked up in Monitor mode */
 	item = (struct item_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_item);
-	if (item && (item->item.ignore_object_index != NONE || item->object.owner_player_index != NONE))
+	if (item && (TEST_FLAG(item->item.flags, _item_belongs_to_player_bit) ||
+				 item->item.ignore_object_index != NONE ||
+				 item->object.owner_player_index != NONE))
 		return 1;
 
 	/* Garbage chunks and projectiles cannot be picked up */

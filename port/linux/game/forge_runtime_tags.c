@@ -1641,7 +1641,9 @@ static int ensure_xbox_map_decompressed_cache(
 	uint8_t hdr[2048];
 	uint32_t head_magic, map_version, decomp_len, tag_off, tag_sz;
 	char map_internal_name[36];
-	int slot;
+	char clean_name[36];
+	char z_donor_named[64];
+	int slot, ci;
 
 	if (!map_path || !map_path[0] || !out_cache_path || out_cache_sz == 0)
 		return 0;
@@ -1671,15 +1673,30 @@ static int ensure_xbox_map_decompressed_cache(
 		return 0;
 	}
 
-	/* 1. Check if OpenCE's Xbox hard-drive cache (z:\cache000.map .. z:\cache005.map or z:\cache_donor.map)
+	memset(clean_name, 0, sizeof(clean_name));
+	for (ci = 0; ci < 31 && map_internal_name[ci]; ci++)
+	{
+		char ch = map_internal_name[ci];
+		if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-')
+			clean_name[ci] = ch;
+		else
+			clean_name[ci] = '_';
+	}
+	if (!clean_name[0])
+		strcpy(clean_name, "donor");
+	snprintf(z_donor_named, sizeof(z_donor_named), "z:\\cache_donor_%s.map", clean_name);
+
+	/* 1. Check if OpenCE's Xbox hard-drive cache (z:\cache_donor_<name>.map, z:\cache000.map .. z:\cache005.map, or z:\cache_donor.map)
 	 * already holds this decompressed Xbox map; if so, use it directly without duplicating! */
-	for (slot = 0; slot <= 6; slot++)
+	for (slot = 0; slot <= 7; slot++)
 	{
 		char z_xbox[64];
 		char z_path[512];
 		FILE *zf;
-		if (slot < 6)
-			snprintf(z_xbox, sizeof(z_xbox), "z:\\cache00%d.map", slot);
+		if (slot == 0)
+			snprintf(z_xbox, sizeof(z_xbox), "%s", z_donor_named);
+		else if (slot <= 6)
+			snprintf(z_xbox, sizeof(z_xbox), "z:\\cache00%d.map", slot - 1);
 		else
 			snprintf(z_xbox, sizeof(z_xbox), "z:\\cache_donor.map");
 		platform_translate_path(z_xbox, z_path, sizeof(z_path));
@@ -1729,10 +1746,8 @@ static int ensure_xbox_map_decompressed_cache(
 		fseek(in_fp, 2048L, SEEK_SET);
 	}
 
-	/* 3. Stream-decompress Xbox v5 map into single transient z:\cache_donor.map slot on demand */
-	platform_translate_path("z:\\cache_donor.map", out_cache_path, out_cache_sz);
-	close_runtime_xbox_donor();
-	close_preview_xbox_donor();
+	/* 3. Stream-decompress Xbox v5 map into per-map persistent z:\cache_donor_<name>.map cache slot on demand */
+	platform_translate_path(z_donor_named, out_cache_path, out_cache_sz);
 	{
 		FILE *tmp_out = fopen(out_cache_path, "wb");
 		z_stream strm;
@@ -2494,7 +2509,6 @@ static unsigned long s_runtime_xbox_donor_seq = 0;
 static void close_runtime_xbox_donor(void)
 {
 	int i;
-	char z_donor[512];
 	for (i = 0; i < FORGE_MAX_DONOR_CACHE_SLOTS; i++)
 	{
 		if (s_runtime_xbox_donors[i].fp)
@@ -2504,8 +2518,6 @@ static void close_runtime_xbox_donor(void)
 	}
 	memset(s_runtime_xbox_donors, 0, sizeof(s_runtime_xbox_donors));
 	s_runtime_xbox_donor_seq = 0;
-	platform_translate_path("z:\\cache_donor.map", z_donor, sizeof(z_donor));
-	remove(z_donor);
 }
 
 static void forge_ui_close_map_tag_browser(void);
@@ -3388,6 +3400,28 @@ static void patch_forge_device_and_light_tag_runtime(long tag_idx, uint32_t grp,
 			*(float *)(obuf + 0x04u) = 0.6f;
 		if (*(float const *)(obuf + 0x104u) < 4.0f)
 			*(float *)(obuf + 0x104u) = 4.0f;
+		if (grp == 'weap')
+		{
+			char *wlabel = (char *)(obuf + 0x308u);
+			unsigned w_j;
+			/* Normalize MCC weapon HUD interface enum values (17..18 -> 15..16) */
+			for (w_j = 0; w_j < 4u; w_j++)
+			{
+				uint16_t val = *(uint16_t const *)(obuf + 0x330u + w_j * 2u);
+				if (val == 17u || val == 18u)
+					*(uint16_t *)(obuf + 0x330u + w_j * 2u) = (uint16_t)(val - 2u);
+			}
+			/* Ensure weapon.label matches a valid cyborg animation class on stock Xbox maps
+			 * so unit_can_use_weapon allows Spartans to pick up, switch to, and fire the weapon! */
+			if (strcmp(wlabel, "ar") != 0 && strcmp(wlabel, "pr") != 0 &&
+				strcmp(wlabel, "pp") != 0 && strcmp(wlabel, "hp") != 0 &&
+				strcmp(wlabel, "sr") != 0 && strcmp(wlabel, "rl") != 0 &&
+				strcmp(wlabel, "sg") != 0 && strcmp(wlabel, "ob") != 0 &&
+				strcmp(wlabel, "flag") != 0)
+			{
+				strcpy(wlabel, "ar");
+			}
+		}
 	}
 	else if (grp == 'scen' || grp == 'mach' || grp == 'lifi' || grp == 'ctrl')
 	{
@@ -3583,14 +3617,11 @@ static struct tag_schema_group const *forge_runtime_schema_group_get(uint32_t gr
 	struct tag_schema_group const *const *list;
 	struct tag_schema_group const *group;
 
-	if (group_tag == 'scex')
-		group_tag = 'schi';
-
-	if (group_tag == 'mod2')
+	if (group_tag == 'mod2' || group_tag == 'scex')
 	{
 		for (group = tag_schema_custom_edition_groups; group->group_tag != 0; group++)
 		{
-			if (group->group_tag == 'mod2')
+			if (group->group_tag == (unsigned long)group_tag)
 				return group;
 		}
 	}
@@ -4048,7 +4079,7 @@ static long load_native_xbox_tag_from_source(
 {
 	FILE *f = NULL;
 	uint8_t hdr[2048];
-	uint32_t tag_off = 0, tag_sz = 0, inst_addr;
+	uint32_t tag_off = 0, tag_sz = 0, inst_addr, hdr_inst_off;
 	int32_t tag_count, i, root_abs_idx = -1;
 	uint8_t *tag_buf = NULL;
 	int keep_cached = 0;
@@ -4170,8 +4201,11 @@ static long load_native_xbox_tag_from_source(
 
 	inst_addr = *(uint32_t const *)(tag_buf + 0x00);
 	tag_count = *(int32_t const *)(tag_buf + 0x0C);
-	if (inst_addr < 0x24u || tag_count <= 0 || tag_count > (strict_untrusted ? 2048 : 16384) ||
-		0x24u + (uint32_t)tag_count * 32u > tag_sz)
+	hdr_inst_off = (*(uint32_t const *)(tag_buf + 0x24u) == 0x74616773u) ? 0x28u : 0x24u;
+	if (inst_addr < hdr_inst_off || tag_count <= 0 || tag_count > 16384 ||
+		hdr_inst_off + (uint32_t)tag_count * 32u > tag_sz ||
+		(strict_untrusted &&
+		 (req_group == 'scnr' || req_group == 'sbsp' || req_group == 'matg' || req_group == 'udlg')))
 	{
 		if (!keep_cached)
 		{
@@ -4185,8 +4219,8 @@ static long load_native_xbox_tag_from_source(
 	memset(&cl, 0, sizeof(cl));
 	cl.tag_buf = tag_buf;
 	cl.tag_sz = tag_sz;
-	cl.tag_base = inst_addr - 0x24u;
-	cl.inst_off = 0x24u;
+	cl.tag_base = inst_addr - hdr_inst_off;
+	cl.inst_off = hdr_inst_off;
 	cl.tag_count = tag_count;
 	cl.is_red_beam_variant = is_red_beam_variant;
 
@@ -4197,23 +4231,16 @@ static long load_native_xbox_tag_from_source(
 		uint32_t grp = *(uint32_t const *)(tag_buf + io + 0x00);
 		uint32_t name_addr = *(uint32_t const *)(tag_buf + io + 0x10);
 		char const *tname;
-		if (strict_untrusted &&
-			(grp == 'scnr' || grp == 'sbsp' || grp == 'matg' || grp == 'udlg'))
-		{
-			free(tag_buf);
-			if (f)
-				fclose(f);
-			return NONE;
-		}
 		if (name_addr < cl.tag_base || (name_addr - cl.tag_base) >= tag_sz)
 			continue;
 		tname = (char const *)(tag_buf + (name_addr - cl.tag_base));
-		if ((grp == req_group || (req_group == 'mod2' && grp == 'mode')) &&
+		if ((grp == req_group ||
+			 (req_group == 'mod2' && grp == 'mode') ||
+			 (req_group == 'mode' && grp == 'mod2')) &&
 			_stricmp(tname, lookup_path) == 0)
 		{
 			root_abs_idx = i;
-			if (!strict_untrusted)
-				break;
+			break;
 		}
 	}
 
@@ -4252,12 +4279,28 @@ static long load_native_xbox_tag_from_source(
 	/* 1. Collect transitive tag dependency closure via OpenCE's tag_schema_group_lists */
 	xbox_visit_tag_index(&cl, root_abs_idx);
 
+	if (strict_untrusted && (cl.order_count <= 0 || cl.order_count > 2048))
+	{
+		free(cl.visited);
+		free(cl.order);
+		free(cl.runtime_handles);
+		free(cl.cloned_roots);
+		if (!keep_cached)
+		{
+			free(tag_buf);
+			if (f)
+				fclose(f);
+		}
+		return NONE;
+	}
+
 	/* 2. Allocate root tag definitions and register them in global_tag_instances */
 	for (i = 0; i < cl.order_count; i++)
 	{
 		int32_t abs_idx = cl.order[i];
 		uint32_t io = cl.inst_off + (uint32_t)abs_idx * 32u;
 		uint32_t grp = *(uint32_t const *)(tag_buf + io + 0x00);
+		uint32_t reg_grp = (grp == 'mod2') ? 'mode' : ((grp == 'scex') ? 'schi' : grp);
 		uint32_t p0 = *(uint32_t const *)(tag_buf + io + 0x04);
 		uint32_t p1 = *(uint32_t const *)(tag_buf + io + 0x08);
 		uint32_t name_addr = *(uint32_t const *)(tag_buf + io + 0x10);
@@ -4275,6 +4318,14 @@ static long load_native_xbox_tag_from_source(
 		if (!root_buf)
 			continue;
 		memcpy(root_buf, tag_buf + (data_addr - cl.tag_base), root_sz);
+		if (grp == 'scex' && root_sz >= 0x70u)
+		{
+			uint32_t scex_flags = *(uint32_t const *)(root_buf + 0x6Cu);
+			if (!*(uint32_t const *)(root_buf + 0x54u))
+				memcpy(root_buf + 0x54u, root_buf + 0x60u, 12u);
+			memset(root_buf + 0x60u, 0, 12u);
+			memcpy(root_buf + 0x60u, &scex_flags, 4u);
+		}
 		cl.cloned_roots[abs_idx] = root_buf;
 		if (is_red_beam_variant)
 		{
@@ -4283,7 +4334,7 @@ static long load_native_xbox_tag_from_source(
 			else
 				snprintf(reg_name, sizeof(reg_name), "%s__red", tname);
 		}
-		else if (abs_idx != root_abs_idx && tag_loaded((long)grp, tname) != NONE)
+		else if (abs_idx != root_abs_idx && tag_loaded((long)reg_grp, tname) != NONE)
 		{
 			snprintf(reg_name, sizeof(reg_name), "%s__donor", tname);
 		}
@@ -4292,7 +4343,7 @@ static long load_native_xbox_tag_from_source(
 			snprintf(reg_name, sizeof(reg_name), "%s", tname);
 		}
 		cl.runtime_handles[abs_idx] = append_runtime_tag_instance(
-			(long)grp,
+			(long)reg_grp,
 			schema->parent_group_tags[0] ? (long)schema->parent_group_tags[0] : (long)p0,
 			schema->parent_group_tags[1] ? (long)schema->parent_group_tags[1] : (long)p1,
 			reg_name,
@@ -4305,8 +4356,9 @@ static long load_native_xbox_tag_from_source(
 		int32_t abs_idx = cl.order[i];
 		uint32_t io = cl.inst_off + (uint32_t)abs_idx * 32u;
 		uint32_t grp = *(uint32_t const *)(tag_buf + io + 0x00);
+		uint32_t rel_grp = (grp == 'scex') ? 'schi' : grp;
 		uint32_t data_addr = *(uint32_t const *)(tag_buf + io + 0x14);
-		struct tag_schema_group const *schema = forge_runtime_schema_group_get(grp);
+		struct tag_schema_group const *schema = forge_runtime_schema_group_get(rel_grp);
 		if (cl.cloned_roots[abs_idx] && schema && schema->definition)
 		{
 			xbox_relocate_schema_elements(
@@ -4500,7 +4552,7 @@ static long load_native_xbox_tag_from_source(
 				sdef->pitch_ranges.address = NULL;
 			}
 		}
-		else if (grp == 'mode')
+		else if (grp == 'mode' || grp == 'mod2')
 		{
 			uint32_t mod_off = data_addr - cl.tag_base;
 			int32_t geom_cnt = *(int32_t const *)(root_buf + 0xD0u);
@@ -4522,6 +4574,27 @@ static long load_native_xbox_tag_from_source(
 				uint8_t *node_base = *(uint8_t **)(root_buf + 0xBCu);
 				if (node_cnt > 0 && node_base)
 					*(float *)(node_base + 48u) = -6.5f;
+			}
+
+			/* Ensure runtime_default_inverse_matrix is initialized on all model nodes */
+			{
+				struct model *mdl = (struct model *)root_buf;
+				short n_cnt = (short)MIN(mdl->nodes.count, MAXIMUM_NODES_PER_MODEL);
+				if (n_cnt > 0 && mdl->nodes.address)
+				{
+					struct model_node *n0 = (struct model_node *)mdl->nodes.address;
+					if (n0->runtime_default_inverse_matrix.scale == 0.0f)
+					{
+						struct real_matrix4x3 def_mats[MAXIMUM_NODES_PER_MODEL];
+						short n_i;
+						model_get_node_matrices(mdl, def_mats, global_origin3d, global_forward3d, global_up3d);
+						for (n_i = 0; n_i < n_cnt; n_i++)
+						{
+							struct model_node *nd = (struct model_node *)mdl->nodes.address + n_i;
+							matrix4x3_inverse(&def_mats[n_i], &nd->runtime_default_inverse_matrix);
+						}
+					}
+				}
 			}
 
 			for (s_idx = 0; s_idx < shdr_cnt && shdr_base; s_idx++)
@@ -4904,6 +4977,45 @@ static int find_donor_map_stems_from_credits(
 		}
 	}
 	return count;
+}
+
+int forge_find_credits_tag_by_hash(uint32_t hash, uint32_t *out_group_tag, char *out_tag_path, size_t out_path_sz)
+{
+	int idx;
+	if (!hash || !out_group_tag || !out_tag_path || out_path_sz == 0)
+		return 0;
+	ensure_credits_loaded();
+	if (s_credits_entry_count <= 0 || !s_credits_entries)
+		return 0;
+	for (idx = 0; idx < s_credits_entry_count; idx++)
+	{
+		uint32_t grp = s_credits_entries[idx].group_tag;
+		char const *tpath = s_credits_entries[idx].tag_path;
+		uint32_t h = 2166136261u;
+		char const *p;
+		h = (h ^ ((grp >> 24) & 0xFF)) * 16777619u;
+		h = (h ^ ((grp >> 16) & 0xFF)) * 16777619u;
+		h = (h ^ ((grp >> 8) & 0xFF)) * 16777619u;
+		h = (h ^ (grp & 0xFF)) * 16777619u;
+		for (p = tpath; *p; p++)
+		{
+			unsigned char c = (unsigned char)*p;
+			if (c == '/')
+				c = '\\';
+			else if (c >= 'A' && c <= 'Z')
+				c = (unsigned char)(c - 'A' + 'a');
+			h = (h ^ c) * 16777619u;
+		}
+		if (!h)
+			h = 1u;
+		if (h == hash)
+		{
+			*out_group_tag = grp;
+			snprintf(out_tag_path, out_path_sz, "%s", tpath);
+			return 1;
+		}
+	}
+	return 0;
 }
 
 static long load_native_xbox_tag_runtime(
@@ -9359,12 +9471,6 @@ int forge_ui_open_map_for_tag_browser(char const *map_path)
 		s_map_browser.xbox_inst_off = 0x28u;
 		s_map_browser.xbox_tag_count = tag_count;
 		s_map_browser.mcc_rt = mcc_forge_browser_open(fp, map_path, tbuf, tag_sz);
-		for (i = 0; i < tag_count; i++)
-		{
-			uint32_t io = s_map_browser.xbox_inst_off + (uint32_t)i * 32u;
-			if (*(uint32_t const *)(tbuf + io + 0x00) == 'scex')
-				*(uint32_t *)(tbuf + io + 0x00) = 'schi';
-		}
 
 		for (c = 0; c < FORGE_BROWSER_NUM_CATS; c++)
 		{
@@ -10292,17 +10398,32 @@ static int extract_xbox_map_tag_to_vault(
 				}
 			}
 		}
-		else if (s_map_browser.is_mcc_map && t_grp == 'scex' &&
-				 data_addr >= cl.tag_base && (data_addr - cl.tag_base) + 0x78u <= cl.tag_sz)
+		else if (s_map_browser.is_mcc_map &&
+				 (t_grp == 'senv' || t_grp == 'soso' || t_grp == 'sotr' || t_grp == 'schi' ||
+				  t_grp == 'scex' || t_grp == 'swat' || t_grp == 'sgla' || t_grp == 'smet' || t_grp == 'spla') &&
+				 data_addr >= cl.tag_base && (data_addr - cl.tag_base) + 0x28u <= cl.tag_sz)
 		{
 			uint8_t *p = masked_tag_buf + (data_addr - cl.tag_base);
-			uint32_t flags = *(uint32_t const *)(p + 0x6Cu);
-			if (!*(uint32_t const *)(p + 0x54u))
-				memcpy(p + 0x54u, p + 0x60u, 12u);
-			memset(p + 0x60u, 0, 12u);
-			memcpy(p + 0x60u, &flags, 4u);
-			*(uint32_t *)(masked_tag_buf + io + 0x00u) = 'schi';
-			*(uint32_t *)(masked_tag_buf + io + 0x04u) = 'shdr';
+			int16_t stype = 4;
+			if (t_grp == 'senv') stype = 3;
+			else if (t_grp == 'soso') stype = 4;
+			else if (t_grp == 'sotr') stype = 5;
+			else if (t_grp == 'schi' || t_grp == 'scex') stype = 6;
+			else if (t_grp == 'swat') stype = 7;
+			else if (t_grp == 'sgla') stype = 8;
+			else if (t_grp == 'smet') stype = 9;
+			else if (t_grp == 'spla') stype = 10;
+			*(int16_t *)(p + 0x24u) = stype;
+			if (t_grp == 'scex' && (data_addr - cl.tag_base) + 0x78u <= cl.tag_sz)
+			{
+				uint32_t flags = *(uint32_t const *)(p + 0x6Cu);
+				if (!*(uint32_t const *)(p + 0x54u))
+					memcpy(p + 0x54u, p + 0x60u, 12u);
+				memset(p + 0x60u, 0, 12u);
+				memcpy(p + 0x60u, &flags, 4u);
+				*(uint32_t *)(masked_tag_buf + io + 0x00u) = 'schi';
+				*(uint32_t *)(masked_tag_buf + io + 0x04u) = 'shdr';
+			}
 		}
 		else if (s_map_browser.is_mcc_map && t_grp == 'weap' &&
 				 data_addr >= cl.tag_base && (data_addr - cl.tag_base) + 0x508u <= cl.tag_sz)

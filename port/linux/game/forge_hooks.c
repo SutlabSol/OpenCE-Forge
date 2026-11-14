@@ -3320,14 +3320,21 @@ void network_chat_update(void)
 		return;
 	}
 
-	/* Auto-enable g_forge_session_enabled ONLY on network clients joining a Forge server via Join Game */
-	if (!g_forge_session_enabled && game_connection() == _game_connection_network_client)
+	/* Synchronize g_forge_session_enabled on network clients with the host's active game variant */
+	if (game_connection() == _game_connection_network_client)
 	{
 		struct game_variant const *v = game_engine_get_variant();
-		if (v && (_wcsicmp(v->human_readable_game_description, L"Forge") == 0 ||
-				  v->universal_variant.score_to_win == 0x3FFFFFFF))
+		if (v)
 		{
-			g_forge_session_enabled = 1;
+			int is_forge_var = (_wcsicmp(v->human_readable_game_description, L"Forge") == 0 ||
+								v->universal_variant.score_to_win == 0x3FFFFFFF ||
+								(v->universal_variant.flags & (1u << 7)) != 0) ? 1 : 0;
+			g_forge_session_enabled = is_forge_var;
+			if (!is_forge_var)
+			{
+				g_forge.mode = _forge_mode_play;
+				g_forge.active_modal = _forge_modal_none;
+			}
 		}
 	}
 
@@ -3834,13 +3841,17 @@ void menu_tags_loaded(char const *map_name)
 	else
 	{
 		struct game_variant const *v = game_engine_get_variant();
-		if (!g_forge_session_enabled &&
-			game_connection() == _game_connection_network_client &&
-			v &&
-			(_wcsicmp(v->human_readable_game_description, L"Forge") == 0 ||
-			 v->universal_variant.score_to_win == 0x3FFFFFFF))
+		if (game_connection() == _game_connection_network_client && v)
 		{
-			g_forge_session_enabled = 1;
+			int is_forge_var = (_wcsicmp(v->human_readable_game_description, L"Forge") == 0 ||
+								v->universal_variant.score_to_win == 0x3FFFFFFF ||
+								(v->universal_variant.flags & (1u << 7)) != 0) ? 1 : 0;
+			g_forge_session_enabled = is_forge_var;
+			if (!is_forge_var)
+			{
+				g_forge.mode = _forge_mode_play;
+				g_forge.active_modal = _forge_modal_none;
+			}
 		}
 		forge_reset_transient_session_state(1);
 
