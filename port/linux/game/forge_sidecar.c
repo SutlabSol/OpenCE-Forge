@@ -51,6 +51,7 @@ extern void platform_translate_path(char const *xbox_path, char *out, unsigned l
 extern void *cache_files_tag_instances(long *count);
 extern short ui_widget_port_multiplayer_maps(char const *const **names, short *last_used);
 extern boolean ui_widget_port_multiplayer_map_choose(short level_index);
+extern boolean main_menu_is_active(void);
 
 /* ---------- constants */
 
