@@ -160,6 +160,8 @@ boolean forge_player_profile_get(long index, struct player_profile *profile);
 struct p2p_listing;
 int forge_p2p_join_listing(struct p2p_listing const *listing);
 int forge_p2p_lobby_games(struct p2p_listing *games, int maximum_count);
+int forge_lan_advertised_game_visible(void *client, void const *game);
+extern int g_forge_session_enabled;
 wchar_t const *forge_game_modes_kind_name(long game_engine_index, byte kind, boolean abbreviated);
 wchar_t const *forge_game_modes_variant_kind_name(struct game_variant const *variant, struct game_variant_options const *options);
 #define game_modes_kind_name forge_game_modes_kind_name
@@ -4649,7 +4651,8 @@ static void browser_games_read(void)
 			struct advertised_game *game = &games[index];
 
 			if (network_game_client_advertised_game_is_valid(game) && !advertised_in_progress(game) == (pass == 0) &&
-				game_from_peer(game) == (multiplayer.mode == _multiplayer_mode_direct_link))
+				game_from_peer(game) == (multiplayer.mode == _multiplayer_mode_direct_link) &&
+				(multiplayer.mode != _multiplayer_mode_lan || forge_lan_advertised_game_visible(client, game)))
 			{
 				multiplayer.games[multiplayer.game_count++] = game;
 			}
@@ -5307,10 +5310,13 @@ static void lobby_browser_choices(struct p2p_lobby_choices *choices, short sourc
 	choices->show_empty = config_boolean("network.browser_show_empty");
 	choices->show_full = config_boolean("network.browser_show_full");
 	choices->engine_type = 0;
-	for (index = 0; index < NUMBEROF(engines); index++)
+	if (!g_forge_session_enabled)
 	{
-		if (!strcmp(engine, engines[index]))
-			choices->engine_type = index;
+		for (index = 0; index < NUMBEROF(engines); index++)
+		{
+			if (!strcmp(engine, engines[index]))
+				choices->engine_type = index;
+		}
 	}
 	choices->maps = !strcmp(maps, "no") ? P2P_LOBBY_MAPS_NO :
 		!strcmp(maps, "downloadable") ? P2P_LOBBY_MAPS_DOWNLOADABLE : P2P_LOBBY_MAPS_YES;
