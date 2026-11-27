@@ -1996,8 +1996,6 @@ static int forge_rip_maps_folder_to_cached_tags(char const *maps_dir)
 			_stricmp(fd.cFileName, "sounds.map") == 0 ||
 			_stricmp(fd.cFileName, "loc.map") == 0 ||
 			_stricmp(fd.cFileName, "ui.map") == 0 ||
-			_stricmp(fd.cFileName, "forgeasset.map") == 0 ||
-			_stricmp(fd.cFileName, "customforgeasset.map") == 0 ||
 			_stricmp(fd.cFileName, "_temp_xbox_decomp.map") == 0)
 		{
 			continue;
@@ -2210,14 +2208,12 @@ void forge_runtime_init(void)
 	CreateDirectoryA("OpenCE Forge/cached_tags", NULL);
 	forge_delete_files_matching("OpenCE Forge/cached_tags/xbox_cache", "*.map");
 	RemoveDirectoryA("OpenCE Forge/cached_tags/xbox_cache");
-	RemoveDirectoryA("OpenCE Forge/custom_tags");
-	RemoveDirectoryA("custom_tags");
 	if (g_forge_session_enabled)
 		forge_ensure_local_tag_cache_built();
 	forge_runtime_reload_catalogs();
 }
 
-/* ---------- NATIVE XBOX & CUSTOM EDITION MAP TAG CACHE LOADER — Tags are loaded natively from extracted map tag bundles and Xbox map caches — (using OpenCE's exact tag schema & hardware vertex/triangle/texture registration). */
+/* ---------- NATIVE RETAIL XBOX MAP TAG CACHE LOADER (using OpenCE's exact tag schema & hardware vertex/triangle/texture registration). */
 
 #define FORGE_MAX_HW_PARTS       48
 #define FORGE_MAX_DYNAMIC_TAGS   1024
@@ -2304,7 +2300,7 @@ static void *forge_phys_alloc(size_t bytes)
 			s_forge_phys_allocs.ptrs[s_forge_phys_allocs.count++] = p;
 		return p;
 	}
-	return calloc(1, alloc_sz);
+	return forge_session_calloc(alloc_sz);
 }
 
 static void forge_register_dyn_sound_perm(struct sound_permutation const *perm)
@@ -2601,7 +2597,7 @@ static long append_runtime_tag_instance(
 	new_abs_idx = existing_count;
 	new_tag_index = ((max_salt + 1) << 16) | (new_abs_idx & 0xFFFF);
 
-	if (parent0 == (uint32_t)NONE)
+	if (parent0 == NONE)
 	{
 		switch (group_tag)
 		{
@@ -2627,7 +2623,7 @@ static long append_runtime_tag_instance(
 			case 'ssce':
 			case 'plac':
 				parent0 = 'obje';
-				parent1 = (uint32_t)NONE;
+				parent1 = NONE;
 				break;
 			case 'soso':
 			case 'senv':
@@ -2910,15 +2906,6 @@ static void patch_forge_device_tag_runtime(long tag_idx, uint32_t grp, char cons
 		}
 	}
 
-	if (grp == 'mach' && tag_path &&
-		(_stricmp(tag_path, "levels\\a30\\devices\\beam emitter\\beam emitter") == 0 ||
-		 _stricmp(tag_path, "levels\\a30\\devices\\beam emitter\\beam emitter red") == 0))
-	{
-		*(float *)(obuf + 0x04u) = 65.0f;  /* bounding_radius */
-		*(float *)(obuf + 0x10u) = 0.0f;   /* bounding_offset.z */
-		*(float *)(obuf + 0x104u) = 65.0f; /* render_bounding_radius */
-	}
-
 	/* Configure 'mach' doors to open/close automatically when players or vehicles approach */
 	if (grp == 'mach')
 	{
@@ -3016,7 +3003,6 @@ struct xbox_runtime_closure
 	int32_t order_count;
 	long *runtime_handles;
 	uint8_t **cloned_roots;
-	int is_red_beam_variant;
 	int include_all_dependencies;
 };
 
@@ -3063,7 +3049,7 @@ static void xbox_visit_tag_index(struct xbox_runtime_closure *cl, int32_t abs_id
 
 	/* Reuse any dependency tag that was already dynamically injected during this session,
 	   or reuse shared base-map dependencies (including sounds) on the active map. */
-	if (cl->order_count > 0 && !cl->is_red_beam_variant && !cl->include_all_dependencies)
+	if (cl->order_count > 0 && !cl->include_all_dependencies)
 	{
 		char donor_name[256];
 		long ex;
@@ -3339,71 +3325,6 @@ static void xbox_relocate_schema_elements(
 	}
 }
 
-static void runtime_tint_dxt1_blue_to_red(uint8_t *pix, uint32_t byte_count)
-{
-	uint32_t off;
-	if (!pix)
-		return;
-	for (off = 0; off + 8u <= byte_count; off += 8u)
-	{
-		uint16_t c0 = *(uint16_t const *)(pix + off + 0u);
-		uint16_t c1 = *(uint16_t const *)(pix + off + 2u);
-		uint32_t lut = *(uint32_t const *)(pix + off + 4u);
-		uint16_t r0 = (uint16_t)((c0 >> 11) & 0x1Fu);
-		uint16_t g0 = (uint16_t)((c0 >> 5) & 0x3Fu);
-		uint16_t b0 = (uint16_t)(c0 & 0x1Fu);
-		uint16_t r1 = (uint16_t)((c1 >> 11) & 0x1Fu);
-		uint16_t g1 = (uint16_t)((c1 >> 5) & 0x3Fu);
-		uint16_t b1 = (uint16_t)(c1 & 0x1Fu);
-		uint16_t nr0 = (b0 > r0) ? b0 : r0;
-		uint16_t nb0 = (r0 < b0) ? (uint16_t)(r0 >> 1) : (uint16_t)(b0 >> 1);
-		uint16_t ng0 = (uint16_t)(g0 >> 2);
-		uint16_t nr1 = (b1 > r1) ? b1 : r1;
-		uint16_t nb1 = (r1 < b1) ? (uint16_t)(r1 >> 1) : (uint16_t)(b1 >> 1);
-		uint16_t ng1 = (uint16_t)(g1 >> 2);
-		uint16_t nc0 = (uint16_t)((nr0 << 11) | (ng0 << 5) | nb0);
-		uint16_t nc1 = (uint16_t)((nr1 << 11) | (ng1 << 5) | nb1);
-
-		if (c0 > c1)
-		{
-			if (nc0 < nc1)
-			{
-				uint16_t tmp = nc0;
-				nc0 = nc1;
-				nc1 = tmp;
-				lut ^= 0x55555555u;
-			}
-			else if (nc0 == nc1)
-			{
-				if (nc0 < 0xFFFFu) nc0++;
-				else nc1--;
-			}
-		}
-		else
-		{
-			if (nc0 > nc1)
-			{
-				uint16_t tmp = nc0;
-				uint32_t new_lut = 0;
-				int p;
-				nc0 = nc1;
-				nc1 = tmp;
-				for (p = 0; p < 16; p++)
-				{
-					uint32_t idx = (lut >> (p * 2)) & 3u;
-					if (idx == 0u) idx = 1u;
-					else if (idx == 1u) idx = 0u;
-					new_lut |= (idx << (p * 2));
-				}
-				lut = new_lut;
-			}
-		}
-		*(uint16_t *)(pix + off + 0u) = nc0;
-		*(uint16_t *)(pix + off + 2u) = nc1;
-		*(uint32_t *)(pix + off + 4u) = lut;
-	}
-}
-
 static void forge_register_d3d_bitmap_texture(struct bitmap_data *bmp, D3DBaseTexture *tex)
 {
 	tex->Data = 0;
@@ -3506,11 +3427,6 @@ static long load_native_xbox_tag_from_source(
 	int d_slot;
 	struct xbox_runtime_closure cl;
 	long root_handle = NONE;
-	int is_red_beam_variant = (req_group == 'mach' &&
-		_stricmp(req_path, "levels\\a30\\devices\\beam emitter\\beam emitter red") == 0) ? 1 : 0;
-	char const *lookup_path = is_red_beam_variant
-		? "levels\\a30\\devices\\beam emitter\\beam emitter"
-		: req_path;
 
 	if (!cache_map_path || !cache_map_path[0])
 		return NONE;
@@ -3617,7 +3533,6 @@ static long load_native_xbox_tag_from_source(
 	cl.tag_base = inst_addr - hdr_inst_off;
 	cl.inst_off = hdr_inst_off;
 	cl.tag_count = tag_count;
-	cl.is_red_beam_variant = is_red_beam_variant;
 
 	/* Locate the requested tag in this Xbox map's tag table */
 	for (i = 0; i < tag_count; i++)
@@ -3632,7 +3547,7 @@ static long load_native_xbox_tag_from_source(
 		if ((grp == req_group ||
 			 (req_group == 'mod2' && grp == 'mode') ||
 			 (req_group == 'mode' && grp == 'mod2')) &&
-			_stricmp(tname, lookup_path) == 0)
+			_stricmp(tname, req_path) == 0)
 		{
 			root_abs_idx = i;
 			break;
@@ -3707,14 +3622,7 @@ static long load_native_xbox_tag_from_source(
 			memcpy(root_buf + 0x60u, &scex_flags, 4u);
 		}
 		cl.cloned_roots[abs_idx] = root_buf;
-		if (is_red_beam_variant)
-		{
-			if (abs_idx == root_abs_idx)
-				snprintf(reg_name, sizeof(reg_name), "%s", req_path);
-			else
-				snprintf(reg_name, sizeof(reg_name), "%s__red", tname);
-		}
-		else if (abs_idx != root_abs_idx && tag_loaded((long)reg_grp, tname) != NONE)
+		if (abs_idx != root_abs_idx && tag_loaded((long)reg_grp, tname) != NONE)
 		{
 			snprintf(reg_name, sizeof(reg_name), "%s__donor", tname);
 		}
@@ -3804,15 +3712,6 @@ static long load_native_xbox_tag_from_source(
 				{
 					free(tex);
 					continue;
-				}
-				if (is_red_beam_variant && bmp->format == 14)
-				{
-					uint32_t name_addr = *(uint32_t const *)(tag_buf + io + 0x10);
-					char const *btname = (name_addr >= cl.tag_base && (name_addr - cl.tag_base) < tag_sz)
-						? (char const *)(tag_buf + (name_addr - cl.tag_base))
-						: "";
-					if (strstr(btname, "jackal shield") != NULL || strstr(btname, "static blue") != NULL)
-						runtime_tint_dxt1_blue_to_red(pix_mem, read_bytes);
 				}
 				bmp->base_address = pix_mem;
 				halo_custom_edition_texels_channels(bmp->base_address, 0); /* _custom_edition_channels_xbox */
@@ -3922,15 +3821,6 @@ static long load_native_xbox_tag_from_source(
 				*(float *)(root_buf + 0x30u) = 1.0f;
 			if (!(*(float const *)(root_buf + 0x34u) > 0.0001f && *(float const *)(root_buf + 0x34u) < 10000.0f))
 				*(float *)(root_buf + 0x34u) = 1.0f;
-
-			/* Shift beam emitter root node down by 6.5 world units (~10m in Forge HUD) so its flare collar sits at the placement origin */
-			if (is_red_beam_variant || _stricmp(req_path, "levels\\a30\\devices\\beam emitter\\beam emitter") == 0)
-			{
-				int32_t node_cnt = *(int32_t const *)(root_buf + 0xB8u);
-				uint8_t *node_base = *(uint8_t **)(root_buf + 0xBCu);
-				if (node_cnt > 0 && node_base)
-					*(float *)(node_base + 48u) = -6.5f;
-			}
 
 			/* Ensure runtime_default_inverse_matrix is initialized on all model nodes */
 			{
@@ -4283,10 +4173,7 @@ static int find_donor_map_stems_from_credits(
 	if (s_credits_entry_count <= 0 || !s_credits_entries)
 		return 0;
 
-	lookup_path = (req_group == 'mach' &&
-		_stricmp(req_path, "levels\\a30\\devices\\beam emitter\\beam emitter red") == 0)
-		? "levels\\a30\\devices\\beam emitter\\beam emitter"
-		: req_path;
+	lookup_path = req_path;
 
 	for (idx = 0; idx < s_credits_entry_count; idx++)
 	{
@@ -7157,10 +7044,6 @@ static int open_preview_xbox_donor_for_tag(uint32_t req_group, char const *req_p
 	if (s_preview_xbox_donor.fp && s_preview_xbox_donor.tag_buf)
 	{
 		int32_t i;
-		char const *lookup = (req_group == 'mach' &&
-			_stricmp(req_path, "levels\\a30\\devices\\beam emitter\\beam emitter red") == 0)
-			? "levels\\a30\\devices\\beam emitter\\beam emitter"
-			: req_path;
 		for (i = 0; i < s_preview_xbox_donor.tag_count; i++)
 		{
 			uint32_t io = s_preview_xbox_donor.inst_off + (uint32_t)i * 32u;
@@ -7170,7 +7053,7 @@ static int open_preview_xbox_donor_for_tag(uint32_t req_group, char const *req_p
 				(name_addr - s_preview_xbox_donor.tag_base) < s_preview_xbox_donor.tag_sz)
 			{
 				char const *tname = (char const *)(s_preview_xbox_donor.tag_buf + (name_addr - s_preview_xbox_donor.tag_base));
-				if (grp == req_group && _stricmp(tname, lookup) == 0)
+				if (grp == req_group && _stricmp(tname, req_path) == 0)
 					return 1;
 			}
 		}
@@ -7460,17 +7343,14 @@ int forge_ui_installed_tag_get_info(
 	if (out_type_str && type_sz > 0)
 		snprintf(out_type_str, type_sz, "%s", browser_group_type_label(e->group_tag));
 	if (out_is_custom)
-		*out_is_custom = (_strnicmp(e->display_name, "[c] ", 4) == 0) ? 1 : 0;
+		*out_is_custom = 0;
 
 	if (out_size_str && size_sz > 0)
 	{
-		if (s_preview_xbox_donor.fp && s_preview_xbox_donor.tag_buf)
+		if (open_preview_xbox_donor_for_tag(e->group_tag, e->tag_path) &&
+			s_preview_xbox_donor.fp && s_preview_xbox_donor.tag_buf)
 		{
 			int32_t i;
-			char const *lookup = (e->group_tag == 'mach' &&
-				_stricmp(e->tag_path, "levels\\a30\\devices\\beam emitter\\beam emitter red") == 0)
-				? "levels\\a30\\devices\\beam emitter\\beam emitter"
-				: e->tag_path;
 			for (i = 0; i < s_preview_xbox_donor.tag_count; i++)
 			{
 				uint32_t io = s_preview_xbox_donor.inst_off + (uint32_t)i * 32u;
@@ -7480,7 +7360,7 @@ int forge_ui_installed_tag_get_info(
 					(name_addr - s_preview_xbox_donor.tag_base) < s_preview_xbox_donor.tag_sz)
 				{
 					char const *tn = (char const *)(s_preview_xbox_donor.tag_buf + (name_addr - s_preview_xbox_donor.tag_base));
-					if (_stricmp(tn, lookup) == 0)
+					if (_stricmp(tn, e->tag_path) == 0)
 					{
 						byte_size = compute_xbox_tag_closure_bytes(
 							s_preview_xbox_donor.tag_buf,
@@ -7501,54 +7381,50 @@ int forge_ui_installed_tag_get_info(
 
 static void remove_manifest_entry_from_file(char const *manifest_path, uint32_t grp, char const *tag_path)
 {
-	FILE *in_fp = fopen(manifest_path, "r");
-	char (*lines)[512];
-	int line_count = 0, i;
-	char grp_str[5];
+	FILE *in_fp;
 	FILE *out_fp;
+	char tmp_path[544];
+	char grp_str[5];
+	char buf[512];
 
+	if (!manifest_path || !manifest_path[0] || !tag_path || !tag_path[0])
+		return;
+	in_fp = fopen(manifest_path, "r");
 	if (!in_fp)
 		return;
-	lines = (char (*)[512])malloc(2048u * sizeof(*lines));
-	if (!lines)
+	snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", manifest_path);
+	out_fp = fopen(tmp_path, "wb");
+	if (!out_fp)
 	{
 		fclose(in_fp);
 		return;
 	}
+
 	grp_str[0] = (char)((grp >> 24) & 0xFF);
 	grp_str[1] = (char)((grp >> 16) & 0xFF);
 	grp_str[2] = (char)((grp >> 8) & 0xFF);
 	grp_str[3] = (char)(grp & 0xFF);
 	grp_str[4] = '\0';
 
+	while (fgets(buf, sizeof(buf), in_fp))
 	{
-		char buf[512];
-		while (line_count < 2048 && fgets(buf, sizeof(buf), in_fp))
+		char l_grp[16], l_path[256];
+		int l_cat = 0, l_src = 0;
+		char *nl = strchr(buf, '\r');
+		if (nl) *nl = '\0';
+		nl = strchr(buf, '\n');
+		if (nl) *nl = '\0';
+		if (sscanf(buf, "%4s|%d|%d|%255[^|\n]", l_grp, &l_cat, &l_src, l_path) == 4 &&
+			_stricmp(l_grp, grp_str) == 0 && _stricmp(l_path, tag_path) == 0)
 		{
-			char l_grp[16], l_path[256];
-			int l_cat = 0, l_src = 0;
-			char *nl = strchr(buf, '\r');
-			if (nl) *nl = '\0';
-			nl = strchr(buf, '\n');
-			if (nl) *nl = '\0';
-			if (sscanf(buf, "%4s|%d|%d|%255[^|\n]", l_grp, &l_cat, &l_src, l_path) == 4 &&
-				_stricmp(l_grp, grp_str) == 0 && _stricmp(l_path, tag_path) == 0)
-			{
-				continue;
-			}
-			snprintf(lines[line_count++], sizeof(lines[0]), "%s", buf);
+			continue;
 		}
+		fprintf(out_fp, "%s\n", buf);
 	}
 	fclose(in_fp);
-
-	out_fp = fopen(manifest_path, "wb");
-	if (out_fp)
-	{
-		for (i = 0; i < line_count; i++)
-			fprintf(out_fp, "%s\n", lines[i]);
-		fclose(out_fp);
-	}
-	free(lines);
+	fclose(out_fp);
+	remove(manifest_path);
+	rename(tmp_path, manifest_path);
 }
 
 int forge_ui_installed_tag_delete(int category_tab, int list_index)
@@ -8345,10 +8221,6 @@ int forge_ui_build_tag_preview_mesh(
 	if (open_preview_xbox_donor_for_tag(e->group_tag, e->tag_path))
 	{
 		int32_t i;
-		char const *lookup = (e->group_tag == 'mach' &&
-			_stricmp(e->tag_path, "levels\\a30\\devices\\beam emitter\\beam emitter red") == 0)
-			? "levels\\a30\\devices\\beam emitter\\beam emitter"
-			: e->tag_path;
 		for (i = 0; i < s_preview_xbox_donor.tag_count; i++)
 		{
 			uint32_t io = s_preview_xbox_donor.inst_off + (uint32_t)i * 32u;
@@ -8358,7 +8230,7 @@ int forge_ui_build_tag_preview_mesh(
 				(n_addr - s_preview_xbox_donor.tag_base) < s_preview_xbox_donor.tag_sz)
 			{
 				char const *tn = (char const *)(s_preview_xbox_donor.tag_buf + (n_addr - s_preview_xbox_donor.tag_base));
-				if (_stricmp(tn, lookup) == 0)
+				if (_stricmp(tn, e->tag_path) == 0)
 				{
 					return build_preview_mesh_from_xbox_map_data(
 						s_preview_xbox_donor.fp,

@@ -2,7 +2,7 @@
 TAG_PREVIEW.C
 
 Software 3D model preview renderer for the Forge Tag Options browser, drawing
-the highlighted Xbox, Custom Edition, or MCC tag into the menu widget's bitmap.
+the highlighted retail Xbox donor tag into the menu widget's bitmap.
 */
 
 #ifndef HALO_RELEASE

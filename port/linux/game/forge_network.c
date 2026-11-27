@@ -844,10 +844,10 @@ void forge_network_send_transform_ext(
 		g_net_obj_is_held[obj_abs] = is_held ? 1 : 0;
 	}
 
-	/* If this client instance has not yet been linked to a Host slot (e.g. while the Host
-	   is downloading a custom/MCC tag from this client), send a negative ordinal live_idx
+	/* If this client instance has not yet been linked to a Host slot (awaiting
+	   the Host's !FH: slot assignment), send a negative ordinal live_idx
 	   (-1 - unlinked_ord) and obj_abs = -1 so the Host updates the matching entry in
-	   g_host_pending_client_spawns without colliding when multiple custom tags are queued. */
+	   g_host_pending_client_spawns without colliding when multiple spawns are queued. */
 	if (game_connection() == _game_connection_network_client &&
 		live_idx >= 0 && live_idx < g_forge.live_instance_count &&
 		(g_forge.live_instances[live_idx].pad_inst & 0x80u) != 0)

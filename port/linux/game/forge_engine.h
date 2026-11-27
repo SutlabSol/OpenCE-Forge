@@ -19,7 +19,7 @@ extern "C" {
 
 #include "halo_port_limits.h"
 
-#define FORGE_VERSION_STRING "2.14.2"
+#define FORGE_VERSION_STRING "2.14.3"
 #define FORGE_NETWORK_VERSION 0x4635
 #define FORGE_GAME_KIND 0x46
 #ifndef HALO_PORT_NETWORK_VERSION_STOCK
@@ -420,7 +420,6 @@ short forge_key_state(int vk);
 
 /* ---------- Catalog Hashing & Instance Sync */
 uint32_t forge_compute_catalog_hash(uint32_t group_tag, char const *tag_path);
-long forge_create_engine_object_for_instance(int32_t live_idx, long def_idx, int is_held);
 void forge_network_register_host_object(int32_t live_idx, long object_index, long definition_index, uint32_t group_tag, char const *tag_path);
 
 #undef GetAsyncKeyState
