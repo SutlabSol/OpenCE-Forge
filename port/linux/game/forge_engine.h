@@ -19,7 +19,7 @@ extern "C" {
 
 #include "halo_port_limits.h"
 
-#define FORGE_VERSION_STRING "2.14.5"
+#define FORGE_VERSION_STRING "2.14.6"
 #define FORGE_NETWORK_VERSION 0x4635
 #define FORGE_GAME_KIND 0x46
 #ifndef HALO_PORT_NETWORK_VERSION_STOCK
