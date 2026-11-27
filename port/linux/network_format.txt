@@ -8,6 +8,7 @@ bound DISTRIBUTED_CLIENT_BUILD_NUMBER_SIZE 12
 bound DISTRIBUTED_CLIENT_BUILD_REPOSITORY_SIZE 144
 bound DISTRIBUTED_CLIENT_BUILD_VERSION_SIZE 64
 bound DISTRIBUTED_DECK_SIZE 4 + 2 + 12 + 6 + 1 + 1 + 2
+bound DISTRIBUTED_FORGE_PAYLOAD_SIZE 64
 bound DISTRIBUTED_INPUT_HISTORY 4
 bound DISTRIBUTED_RELAYED_ACTION_MAXIMUM_SIZE 14 + 2 * (DISTRIBUTED_INPUT_HISTORY - 1)
 bound DISTRIBUTED_RELAYED_ACTION_MINIMUM_SIZE 14
@@ -110,6 +111,8 @@ enum _distributed_message_coop_sounds_retired 67
 enum _distributed_message_damage_animations 75
 enum _distributed_message_damage_events 10
 enum _distributed_message_fire_origins 93
+enum _distributed_message_forge_down 109
+enum _distributed_message_forge_up 108
 enum _distributed_message_game_state 7
 enum _distributed_message_hit_reports 11
 enum _distributed_message_inventories 4
@@ -330,6 +333,7 @@ struct distributed_damage_event 659e4d49733b
 struct distributed_damage_event_message c954363dcf26
 struct distributed_fire_origin 700dfdb20582
 struct distributed_fire_origin_message 7613e8f9d43e
+struct distributed_forge_message 192a9b5dc069
 struct distributed_hit_report 9a44ca43a88b
 struct distributed_hit_report_message 37279f2addca
 struct distributed_infection_player d8b98eecf26b

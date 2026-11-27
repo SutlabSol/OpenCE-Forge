@@ -179,7 +179,20 @@ enum
 	ids from _distributed_message_mcc_grenades up outside MCC games */
 	_distributed_message_vehicle_riding_map = 107,
 
+	/* Forge synchronization packets (client->host and host->client), reliably over the stream. */
+	_distributed_message_forge_up = 108,
+	_distributed_message_forge_down = 109,
+
 	NUMBER_OF_DISTRIBUTED_MESSAGES
+};
+
+enum { DISTRIBUTED_FORGE_PAYLOAD_SIZE = 64 };
+struct distributed_forge_message
+{
+	byte player_index;
+	byte flags;
+	byte pad[2];
+	char text[DISTRIBUTED_FORGE_PAYLOAD_SIZE];
 };
 
 /* a client's build, as text (every field printable ASCII and ended; mods a
@@ -425,6 +438,11 @@ word network_chat_line_entry_size(void);
 /* (a client) the host's chat settings; from_stream: as above */
 void network_chat_handle_config(void const *entries, boolean from_stream);
 word network_chat_config_entry_size(void);
+
+/* ---------- prototypes/FORGE_NETWORK.C */
+
+void forge_network_handle_up(long machine_index, void const *entries);
+void forge_network_handle_down(void const *entries);
 
 /* ---------- prototypes/NETWORK_ACTORS.C */
 
