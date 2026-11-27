@@ -1366,6 +1366,10 @@ static void physics_compute_unit_collisions(
 		return;
 
 	vehicle = vehicle_get(vehicle_index);
+	/* port: skip unit/vehicle collisions while collisions are disabled (e.g. held in Forge) */
+	if (TEST_FLAG(vehicle->object.flags, _object_no_collisions_bit))
+		return;
+
 	object_count = objects_in_sphere(
 		_object_mask_biped,
 		_object_mask_vehicle + (model_instance_valid ? _object_mask_biped : 0),
@@ -1399,12 +1403,13 @@ static void physics_compute_unit_collisions(
 		{
 			if (object_index != vehicle_index)
 			{
+				struct unit_datum *other_vehicle = vehicle_get(object_index);
 				struct physics_instance other_physics;
 
-				if (physics_instance_new(&other_physics, object_index))
+				/* port: do not push against a non-collidable vehicle (e.g. newly copied/held in Forge) */
+				if (!TEST_FLAG(other_vehicle->object.flags, _object_no_collisions_bit) &&
+					physics_instance_new(&other_physics, object_index))
 				{
-					struct unit_datum *other_vehicle = vehicle_get(object_index);
-
 					if (DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) <
 						DATUM_INDEX_TO_ABSOLUTE_INDEX(vehicle_index) ||
 						TEST_FLAG(other_vehicle->object.flags, _object_at_rest_bit) ||

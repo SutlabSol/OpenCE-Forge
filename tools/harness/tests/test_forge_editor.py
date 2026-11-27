@@ -16,6 +16,7 @@ def generated(fault=None):
         function(m3d, "forward_up_to_euler"),
         function(m3d, "gametype_flags_label"),
         function(m3d, "cycle_gametype_flags"),
+        function(m3d, "forge_compute_vehicle_copy_candidate_offset"),
         function(rt, "forge_compute_catalog_hash"),
     ])
     if fault:
@@ -23,7 +24,7 @@ def generated(fault=None):
     return (("under_test.inc", code),)
 
 
-@pytest.mark.parametrize("case", ["euler", "gametype", "hash"])
+@pytest.mark.parametrize("case", ["euler", "gametype", "hash", "vehicle_copy_offset"])
 def test_case(case):
     status, output = run(build("forge_editor", generated()), case)
     assert status == 0, output
@@ -33,6 +34,7 @@ def test_case(case):
     (('up->k = cp * cr;', 'up->k = -cp * cr;'), 'euler'),
     (('cur = (cur + 6 + dir) % 6;', 'cur = (cur + 6) % 6;'), 'gametype'),
     (('if (c == \'/\')\n\t\t\t\tc = \'\\\\\';', 'if (0)\n\t\t\t\tc = \'\\\\\';'), 'hash'),
+    (('horiz_sep = r * 2.15f + 0.45f;', 'horiz_sep = 0.0f;'), 'vehicle_copy_offset'),
 ])
 def test_negative_control(fault, case):
     status, output = run(build("forge_editor", generated(fault)), case)

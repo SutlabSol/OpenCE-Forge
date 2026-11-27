@@ -24,6 +24,7 @@ menus, weld groups, dynamic lights, teleporters, and map saving.
 #include "camera/observer.h"
 #include "objects/objects.h"
 #include "units/units.h"
+#include "units/vehicle_datum.h"
 #include "physics/collisions.h"
 #include "interface/interface.h"
 #include "interface/ui_widget.h"
@@ -2907,6 +2908,171 @@ int32_t forge_3d_spawn_object_at_slot(
 	return live_idx;
 }
 
+static int forge_compute_vehicle_copy_candidate_offset(
+	float cam_yaw,
+	float bounding_radius,
+	int candidate_idx,
+	float *out_ox,
+	float *out_oy,
+	float *out_oz)
+{
+	float r = bounding_radius;
+	float horiz_sep, vert_sep;
+	float hfwd_x, hfwd_y, right_x, right_y;
+
+	if (!out_ox || !out_oy || !out_oz)
+		return 0;
+
+	if (!(r > 0.1f))
+		r = 1.8f;
+	if (r < 1.2f)
+		r = 1.2f;
+	if (r > 4.0f)
+		r = 4.0f;
+
+	horiz_sep = r * 2.15f + 0.45f;
+	vert_sep = r * 1.55f + 0.45f;
+	hfwd_x = (float)cos((double)cam_yaw);
+	hfwd_y = (float)sin((double)cam_yaw);
+	right_x = hfwd_y;
+	right_y = -hfwd_x;
+
+	switch (candidate_idx)
+	{
+	case 0:
+		*out_ox = right_x * horiz_sep;
+		*out_oy = right_y * horiz_sep;
+		*out_oz = 0.25f;
+		return 1;
+	case 1:
+		*out_ox = -right_x * horiz_sep;
+		*out_oy = -right_y * horiz_sep;
+		*out_oz = 0.25f;
+		return 1;
+	case 2:
+		*out_ox = -hfwd_x * horiz_sep;
+		*out_oy = -hfwd_y * horiz_sep;
+		*out_oz = 0.25f;
+		return 1;
+	case 3:
+		*out_ox = hfwd_x * horiz_sep;
+		*out_oy = hfwd_y * horiz_sep;
+		*out_oz = 0.25f;
+		return 1;
+	case 4:
+		*out_ox = 0.0f;
+		*out_oy = 0.0f;
+		*out_oz = vert_sep;
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static int forge_find_clear_vehicle_copy_offset(
+	struct forge_live_instance const *src_inst,
+	float *out_ox,
+	float *out_oy,
+	float *out_oz)
+{
+	float radius = 1.8f;
+	float min_vehi_dist, min_d2;
+	int cand;
+
+	if (!src_inst || !out_ox || !out_oy || !out_oz)
+		return 0;
+
+	*out_ox = 0.0f;
+	*out_oy = 0.0f;
+	*out_oz = 0.0f;
+
+	if (src_inst->object_index != NONE)
+	{
+		struct object_datum const *src_obj = forge_valid_object_get(src_inst->object_index);
+		if (src_obj && src_obj->object.bounding_sphere_radius > 0.1f)
+			radius = src_obj->object.bounding_sphere_radius;
+	}
+	min_vehi_dist = radius * 1.85f;
+	if (min_vehi_dist < 2.4f)
+		min_vehi_dist = 2.4f;
+	min_d2 = min_vehi_dist * min_vehi_dist;
+
+	for (cand = 0; cand < 5; cand++)
+	{
+		float ox = 0.0f, oy = 0.0f, oz = 0.0f;
+		real_point3d cand_pt, ray_start;
+		real_vector3d ray_vec;
+		struct collision_result rcoll;
+		int j, blocked = 0;
+
+		if (!forge_compute_vehicle_copy_candidate_offset(g_forge.cam_yaw, radius, cand, &ox, &oy, &oz))
+			continue;
+
+		cand_pt.x = src_inst->x + ox;
+		cand_pt.y = src_inst->y + oy;
+		cand_pt.z = src_inst->z + oz;
+		if (scenario_leaf_index_from_point(&cand_pt) == NONE)
+			continue;
+
+		ray_start.x = src_inst->x;
+		ray_start.y = src_inst->y;
+		ray_start.z = src_inst->z + 0.5f;
+		ray_vec.i = ox;
+		ray_vec.j = oy;
+		ray_vec.k = oz;
+		memset(&rcoll, 0, sizeof(rcoll));
+		if (collision_test_vector(
+			FLAG(_collision_test_structure_bit) |
+			FLAG(_collision_test_front_facing_surfaces_bit) |
+			FLAG(_collision_test_back_facing_surfaces_bit),
+			&ray_start, &ray_vec, NONE, &rcoll))
+		{
+			continue;
+		}
+
+		for (j = 0; j < g_forge.live_instance_count; j++)
+		{
+			struct forge_live_instance const *vj = &g_forge.live_instances[j];
+			float vx, vy, vz, ddx, ddy, ddz;
+			struct object_datum const *vobj;
+
+			if (!vj->active || vj->group_tag != 'vehi')
+				continue;
+			vobj = (vj->object_index != NONE) ? forge_valid_object_get(vj->object_index) : NULL;
+			if (vobj)
+			{
+				vx = vobj->object.position.x;
+				vy = vobj->object.position.y;
+				vz = vobj->object.position.z;
+			}
+			else
+			{
+				vx = vj->x;
+				vy = vj->y;
+				vz = vj->z;
+			}
+			ddx = vx - cand_pt.x;
+			ddy = vy - cand_pt.y;
+			ddz = vz - cand_pt.z;
+			if (ddx * ddx + ddy * ddy + ddz * ddz < min_d2)
+			{
+				blocked = 1;
+				break;
+			}
+		}
+
+		if (!blocked)
+		{
+			*out_ox = ox;
+			*out_oy = oy;
+			*out_oz = oz;
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 int32_t forge_3d_spawn_object_at(
 	uint32_t group_tag,
 	char const *tag_path,
@@ -3022,6 +3188,13 @@ void forge_3d_move_instance_ext(
 			}
 			if (obj->object.type == _object_type_vehicle)
 			{
+				struct vehicle_datum *vdat = (struct vehicle_datum *)obj;
+				vdat->vehicle.collision_force.i = 0.0f;
+				vdat->vehicle.collision_force.j = 0.0f;
+				vdat->vehicle.collision_force.k = 0.0f;
+				vdat->vehicle.collision_torque.i = 0.0f;
+				vdat->vehicle.collision_torque.j = 0.0f;
+				vdat->vehicle.collision_torque.k = 0.0f;
 				unit_set_enterable_by_player(inst->object_index, TRUE);
 				unit_set_controllable(inst->object_index, TRUE);
 				if (is_held)
@@ -8452,7 +8625,10 @@ void forge_3d_update(float dt)
 				int32_t src_followers[FORGE_MAX_WELD_FOLLOWERS];
 				int src_fcount = 0;
 				uint8_t new_gid = 0;
-				float dx, dy, dz, dist;
+				int copy_has_vehicle = (src_inst.group_tag == 'vehi') ? 1 : 0;
+				float copy_ox = 0.0f, copy_oy = 0.0f, copy_oz = 0.0f;
+				float copy_x, copy_y, copy_z;
+				float dx, dy, dz, raw_dist, dist;
 				int32_t spawned_idx;
 
 				forge_sync_live_instance_from_engine_object(&src_inst);
@@ -8473,14 +8649,24 @@ void forge_3d_update(float dt)
 							g_forge.live_instances[mi].group_id == src_inst.group_id)
 						{
 							src_followers[src_fcount++] = mi;
+							if (g_forge.live_instances[mi].group_tag == 'vehi')
+								copy_has_vehicle = 1;
 						}
 					}
 				}
 
-				dx = src_inst.x - g_forge.cam_x;
-				dy = src_inst.y - g_forge.cam_y;
-				dz = src_inst.z - g_forge.cam_z;
-				dist = (float)sqrt((double)(dx * dx + dy * dy + dz * dz));
+				if (copy_has_vehicle)
+					forge_find_clear_vehicle_copy_offset(&src_inst, &copy_ox, &copy_oy, &copy_oz);
+
+				copy_x = src_inst.x + copy_ox;
+				copy_y = src_inst.y + copy_oy;
+				copy_z = src_inst.z + copy_oz;
+
+				dx = copy_x - g_forge.cam_x;
+				dy = copy_y - g_forge.cam_y;
+				dz = copy_z - g_forge.cam_z;
+				raw_dist = (float)sqrt((double)(dx * dx + dy * dy + dz * dz));
+				dist = raw_dist;
 				if (dist < 1.5f) dist = 1.5f;
 				if (dist > 20.0f) dist = 20.0f;
 
@@ -8488,9 +8674,9 @@ void forge_3d_update(float dt)
 					src_inst.group_tag,
 					src_inst.tag_path,
 					src_inst.source_cache_id,
-					src_inst.x,
-					src_inst.y,
-					src_inst.z,
+					copy_x,
+					copy_y,
+					copy_z,
 					src_inst.yaw,
 					src_inst.pitch,
 					src_inst.roll,
@@ -8501,6 +8687,12 @@ void forge_3d_update(float dt)
 					struct forge_live_instance *new_inst = &g_forge.live_instances[spawned_idx];
 					forge_copy_extended_props_between_instances(new_inst, &src_inst);
 					new_inst->group_id = (src_fcount > 0) ? new_gid : 0;
+					forge_3d_move_instance_ext(
+						spawned_idx,
+						new_inst->x, new_inst->y, new_inst->z,
+						new_inst->yaw, new_inst->pitch, new_inst->roll,
+						1,
+						0);
 					forge_sync_instance_extended_props_to_edit_state(spawned_idx);
 					if (forge_is_multiplayer_session())
 						forge_network_send_object_props(spawned_idx);
@@ -8517,7 +8709,7 @@ void forge_3d_update(float dt)
 								fsrc.group_tag,
 								fsrc.tag_path,
 								fsrc.source_cache_id,
-								fsrc.x, fsrc.y, fsrc.z,
+								fsrc.x + copy_ox, fsrc.y + copy_oy, fsrc.z + copy_oz,
 								fsrc.yaw, fsrc.pitch, fsrc.roll,
 								fsrc.team_designator,
 								1);
@@ -8526,6 +8718,12 @@ void forge_3d_update(float dt)
 								struct forge_live_instance *fn = &g_forge.live_instances[fspawn];
 								forge_copy_extended_props_between_instances(fn, &fsrc);
 								fn->group_id = new_gid;
+								forge_3d_move_instance_ext(
+									fspawn,
+									fn->x, fn->y, fn->z,
+									fn->yaw, fn->pitch, fn->roll,
+									1,
+									0);
 								forge_sync_instance_extended_props_to_edit_state(fspawn);
 								if (forge_is_multiplayer_session())
 									forge_network_send_object_props(fspawn);
@@ -8534,6 +8732,22 @@ void forge_3d_update(float dt)
 						g_forge.active_weld_group = new_gid;
 					}
 					forge_server_mark_dirty();
+
+					if (copy_has_vehicle && (copy_ox != 0.0f || copy_oy != 0.0f || copy_oz != 0.0f))
+					{
+						float horiz = (float)sqrt((double)(dx * dx + dy * dy));
+						if (raw_dist >= 0.5f && horiz > 0.05f)
+						{
+							dist = raw_dist;
+							if (dist < 1.0f) dist = 1.0f;
+							if (dist > 30.0f) dist = 30.0f;
+							g_forge.cam_yaw = (float)atan2((double)dy, (double)dx);
+							g_forge.cam_pitch = (float)atan2((double)dz, (double)horiz);
+							if (g_forge.cam_pitch > 1.48f) g_forge.cam_pitch = 1.48f;
+							if (g_forge.cam_pitch < -1.48f) g_forge.cam_pitch = -1.48f;
+							euler_to_forward_up(g_forge.cam_yaw, g_forge.cam_pitch, g_forge.cam_roll, &fwd, &up);
+						}
+					}
 
 					g_forge.koth_group_placing = 0;
 					g_forge.grabbed_live_index = spawned_idx;
