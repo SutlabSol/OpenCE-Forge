@@ -250,6 +250,7 @@ symbols in this file:
 #include "cseries.h"
 #include "game_modes.h" /* port: port/linux/game/game_modes.c */
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
+#include "forge_net_override.h" /* port: port/linux/game/forge_net_override.h */
 #include "bungie_net/common/message_header.h"
 #include "bungie_net/network/transport.h"
 #include "bungie_net/network/transport_endpoint_winsock.h"
@@ -1496,6 +1497,7 @@ boolean network_game_server_handle_client_message(
 				{
 					long machine_index;
 
+					network_game_server_client_machine_heard(server, machine);
 					network_game_server_get_client_machine(server, machine, &machine_index);
 					/* (port: from its stream, which only it can send on) */
 					network_distributed_handle_stream_message(machine_index, message, message_buffer_size);
