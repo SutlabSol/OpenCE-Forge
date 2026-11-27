@@ -75,5 +75,14 @@ int main(int argc, char **argv)
 		CHECK(forge_compute_vehicle_copy_candidate_offset(cam_yaw, 0.0f, 0, &ox0, &oy0, &oz0) == 1 && sqrtf(ox0 * ox0 + oy0 * oy0) > 3.0f, "default radius clears vehicles");
 		CHECK(forge_compute_vehicle_copy_candidate_offset(cam_yaw, 2.0f, 99, &bad, &oy0, &oz0) == 0, "invalid candidate rejected");
 	}
+	else CASE("input_suppress")
+	{
+		CHECK(forge_should_suppress_editor_input(0, 0, 0) == 0, "normal play should allow monitor input");
+		CHECK(forge_should_suppress_editor_input(1, 0, 0) == 1, "pause menu must suppress monitor input");
+		CHECK(forge_should_suppress_editor_input(0, 1, 0) == 1, "text chat typing must suppress monitor input");
+		CHECK(forge_should_suppress_editor_input(0, 0, 1) == 1, "dev console must suppress monitor input");
+		CHECK(forge_should_suppress_editor_input(0, 1, 1) == 1, "chat + console must suppress monitor input");
+		CHECK(forge_should_suppress_editor_input(1, 1, 1) == 1, "all active must suppress monitor input");
+	}
 	return 0;
 }

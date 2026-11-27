@@ -69,6 +69,8 @@ extern void hud_hires_register_placeholder(long asset, unsigned long const *text
 extern int config_boolean(char const *name);
 extern char const *config_string(char const *name);
 extern short controller_glyph_style(void);
+extern boolean console_is_active(void);
+extern boolean orig_network_chat_typing(void);
 
 struct controller_glyph_asset
 {
@@ -6589,6 +6591,14 @@ static int forge_build_object_prop_rows(
 	return n;
 }
 
+static int forge_should_suppress_editor_input(
+	int ui_active,
+	int chat_typing,
+	int console_active)
+{
+	return (ui_active || chat_typing || console_active) ? 1 : 0;
+}
+
 void forge_3d_update(float dt)
 {
 	static int prev_f1, prev_f2, prev_f4, prev_f5, prev_f7, prev_f8, prev_esc, prev_x, prev_bk, prev_lmb;
@@ -6613,7 +6623,8 @@ void forge_3d_update(float dt)
 	if (g_forge_session_enabled)
 	{
 		forge_runtime_init();
-		forge_poll_controller_state(&gp_lx, &gp_ly, &gp_rx, &gp_ry, &gp_lt, &gp_rt);
+		if (!orig_network_chat_typing() && !console_is_active())
+			forge_poll_controller_state(&gp_lx, &gp_ly, &gp_rx, &gp_ry, &gp_lt, &gp_rt);
 	}
 
 	if (g_forge.active_modal == _forge_modal_save_copy_as && s_prev_modal != _forge_modal_save_copy_as)
@@ -7031,14 +7042,54 @@ void forge_3d_update(float dt)
 		}
 	}
 
-	/* When the native in-game Escape Pause Menu is open, pause Forge flight/editor input
-	   and suppress any held mouse click so clicking a pause menu option never grabs an object behind the menu! */
-	if (ui_widgets_active())
+	/* When the native in-game Escape Pause Menu, text chat input, or dev console is open,
+	   pause Forge flight/editor input, drain mouse look so the camera never snaps on close,
+	   and latch prev_* states so clicking/Enter/Escape/Backspace never trigger Forge actions! */
+	if (forge_should_suppress_editor_input(
+			ui_widgets_active() != FALSE,
+			orig_network_chat_typing() != FALSE,
+			console_is_active() != FALSE))
 	{
+		float discard_yaw = 0.0f;
+		float discard_pitch = 0.0f;
+
+		halo_linux_mouse_look(0, &discard_yaw, &discard_pitch);
+		if (g_forge.grabbed_live_index >= 0 &&
+			g_forge.grabbed_live_index < g_forge.live_instance_count &&
+			g_forge.live_instances[g_forge.grabbed_live_index].active)
+		{
+			struct forge_live_instance const *held = &g_forge.live_instances[g_forge.grabbed_live_index];
+			forge_3d_move_instance_ext(
+				g_forge.grabbed_live_index,
+				held->x, held->y, held->z,
+				held->yaw, held->pitch, held->roll,
+				1, 0);
+		}
 		s_suppress_lmb_until_release = 1;
-		prev_lmb = 1;
-		prev_enter = 1;
+		prev_f1 = 1;
+		prev_f2 = 1;
+		prev_f4 = 1;
+		prev_f5 = 1;
+		prev_f7 = 1;
+		prev_f8 = 1;
 		prev_esc = 1;
+		prev_x = 1;
+		prev_bk = 1;
+		prev_lmb = 1;
+		prev_up = 1;
+		prev_down = 1;
+		prev_left = 1;
+		prev_right = 1;
+		prev_enter = 1;
+		prev_g = 1;
+		prev_z = 1;
+		prev_f = 1;
+		prev_del = 1;
+		prev_rot = 1;
+		prev_copy = 1;
+		prev_undo = 1;
+		prev_redo = 1;
+		prev_weld = 1;
 		return;
 	}
 
