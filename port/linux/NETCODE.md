@@ -473,6 +473,14 @@ Version 44 unifies MCC offers under Map Sharing and lets a receiver satisfy
 omitted base resources with its own validated local files. Message layouts
 are unchanged; the changed sharing agreement requires matching peers.
 
+Messages 108 (`_distributed_message_forge_up`, client to host over the
+client's reliable stream) and 109 (`_distributed_message_forge_down`, host
+to client over its reliable stream) carry Forge synchronization payloads
+(`struct distributed_forge_message`, 68 bytes) cleanly without touching
+the chat channel (`port/linux/game/forge_network.c`). Note that Forge
+sessions use protocol version `FORGE_NETWORK_VERSION` (`0x4635`) so
+Forge lobbies isolate cleanly from standard sessions.
+
 `port/linux/network_format.txt` records the wire format of the current
 version (`tools/network_format.py`): `test_linux_port.py` fails when the
 sources' messages, kinds, bits, structs sent whole or the sizes of their
