@@ -819,8 +819,6 @@ static void gamemode_menu_update(struct widget_instance *list)
 						L"INSTALLED TAGS\r\nPREVIEW & MANAGE TAGS\r\nIN THE FORGE CACHE" :
 					!strcmp(fc, "forge_item_reset_stock_tags") ?
 						L"RESET STOCK TAGS\r\nRESTORE DEFAULT STOCK\r\nTAGS IN THE CACHE" :
-					!strcmp(fc, "forge_item_snap_points") ?
-						L"SNAP POINTS\r\nASSIGN 3D SNAP FACES &\r\nALIGNMENT EDGES" :
 						L"SINGLE PLAYER FORGE\r\nEDIT STOCK, CUSTOM OR\r\nFORGE MAPS SOLO",
 					160);
 			}

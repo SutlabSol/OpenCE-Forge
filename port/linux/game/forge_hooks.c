@@ -1152,8 +1152,6 @@ static struct
 	int preserve_on_return;
 } s_inst_browser = { 0, 0, 0, 0 };
 
-static int s_preview_rev = 1;
-
 static void fw_text_set_wide(struct forge_widget_instance *tb, wchar_t const *wstr)
 {
 	int i;
@@ -1349,7 +1347,6 @@ static void update_forge_installed_tags_widget(struct forge_widget_instance *lis
 		s_inst_browser.cat = cat;
 		s_inst_browser.first = 0;
 		s_inst_browser.chosen = 0;
-		s_preview_rev++;
 		if (fw_focused_row(list) >= 1)
 			fw_focus_row(list, 1);
 	}
@@ -1581,7 +1578,6 @@ boolean pc_menu_event_function_invoke(
 			if (s_inst_browser.first > s_inst_browser.chosen)
 				s_inst_browser.first = s_inst_browser.chosen;
 			fw_focus_row(widget, (cnt > 0) ? (1 + s_inst_browser.chosen - s_inst_browser.first) : 0);
-			s_preview_rev++;
 			return TRUE;
 		}
 	}
@@ -1741,14 +1737,12 @@ boolean pc_menu_event_function_invoke(
 		if (w_name && strcmp(w_name, "forge_installed_tag_delete_btn") == 0)
 		{
 			forge_ui_installed_tag_delete(s_inst_browser.cat, s_inst_browser.chosen);
-			s_preview_rev++;
 			ui_play_audio_feedback_sound(2);
 			return TRUE;
 		}
 		if (w_name && strcmp(w_name, "forge_confirm_reset_stock_ok") == 0)
 		{
 			forge_reset_stock_tag_cache();
-			s_preview_rev++;
 			ui_play_audio_feedback_sound(2);
 			return TRUE;
 		}
@@ -3534,23 +3528,8 @@ void platform_input_read(struct forge_sdl_input_state *state, BOOL consume_motio
 
 /* ---------- Server Browser & LAN Browser 'FORGE' Gamemode Display & Cross-Version Compatibility */
 
-extern byte game_modes_kind(struct game_variant const *variant, struct game_variant_options const *options);
 extern wchar_t const *game_modes_kind_name(long game_engine_index, byte kind, boolean abbreviated);
 extern wchar_t const *game_modes_variant_kind_name(struct game_variant const *variant, struct game_variant_options const *options);
-
-byte forge_game_modes_kind(struct game_variant const *variant, struct game_variant_options const *options)
-{
-	if (variant && (_wcsicmp(variant->human_readable_game_description, L"Forge") == 0 ||
-					variant->universal_variant.score_to_win == 0x3FFFFFFF))
-	{
-		return FORGE_GAME_KIND;
-	}
-	if (g_forge_session_enabled && !variant)
-	{
-		return FORGE_GAME_KIND;
-	}
-	return game_modes_kind(variant, options);
-}
 
 wchar_t const *forge_game_modes_kind_name(long game_engine_index, byte kind, boolean abbreviated)
 {
@@ -3705,14 +3684,6 @@ void forge_network_register_host_object(
 	(void)group_tag; (void)tag_path;
 }
 void forge_send_packet_to_host(char const *ascii_payload) { (void)ascii_payload; }
-void forge_network_pre_handle_object_changes(void const *entries, short count)
-{
-	(void)entries; (void)count;
-}
-void forge_network_post_handle_object_changes(void const *entries, short count)
-{
-	(void)entries; (void)count;
-}
 void network_distributed_notify_forge_monitor_teleport(
 	long player_index,
 	long unit_index,

@@ -1769,12 +1769,12 @@ static void draw_sized_bottom_pill_bar(
 		set_forge_hud_ui_scale(FORGE_IN_MATCH_HUD_SCALE, (float)(safe_x0 + safe_x1) * 0.5f, (float)y_bottom);
 		if (!draw_ce_rounded_row_bar(frame_idx, bx0, row1_y0, bx1, row1_y1))
 		{
-			rectangle2d r1 = { row1_y0, bx0, row1_y1, bx1 };
+			rectangle2d r1 = { { row1_y0, bx0, row1_y1, bx1 } };
 			draw_themed_panel(fallback_area, &r1, 0);
 		}
 		if (!draw_ce_rounded_row_bar(frame_idx, bx0, row2_y0, bx1, row2_y1))
 		{
-			rectangle2d r2 = { row2_y0, bx0, row2_y1, bx1 };
+			rectangle2d r2 = { { row2_y0, bx0, row2_y1, bx1 } };
 			draw_themed_panel(fallback_area, &r2, 0);
 		}
 		draw_ce_menu_str_box(0, fallback_font, bx0, (short)(row1_y0 + 2), bx1, row1_y1, 2 /* center */, line1, text_col);
@@ -1789,7 +1789,7 @@ static void draw_sized_bottom_pill_bar(
 		set_forge_hud_ui_scale(FORGE_IN_MATCH_HUD_SCALE, (float)(safe_x0 + safe_x1) * 0.5f, (float)y_bottom);
 		if (!draw_ce_rounded_row_bar(frame_idx, bx0, by0, bx1, by1))
 		{
-			rectangle2d bbar = { by0, bx0, by1, bx1 };
+			rectangle2d bbar = { { by0, bx0, by1, bx1 } };
 			draw_themed_panel(fallback_area, &bbar, 0);
 		}
 		draw_ce_menu_str_box(0, fallback_font, bx0, (short)(by0 + 2), bx1, by1, 2 /* center */, line1, text_col);
@@ -2638,48 +2638,6 @@ static long forge_create_configured_engine_object(
 	object_set_automatic_deactivation(obj_idx, FALSE);
 	object_activate(obj_idx);
 	forge_ensure_object_connected_to_bsp(obj_idx, x, y, z);
-	return obj_idx;
-}
-
-long forge_create_engine_object_for_instance(int32_t live_idx, long def_idx, int is_held)
-{
-	struct forge_live_instance *inst;
-	long obj_idx;
-
-	if (live_idx < 0 || live_idx >= g_forge.live_instance_count || def_idx == NONE)
-		return NONE;
-	inst = &g_forge.live_instances[live_idx];
-	if (!inst->active)
-		return NONE;
-
-	if (inst->object_index != NONE)
-	{
-		if (forge_valid_object_get(inst->object_index))
-			object_delete(inst->object_index);
-		inst->object_index = NONE;
-	}
-
-	obj_idx = forge_create_configured_engine_object(
-		def_idx,
-		inst->group_tag,
-		inst->x, inst->y, inst->z,
-		inst->yaw, inst->pitch, inst->roll);
-	inst->object_index = obj_idx;
-	inst->pad_inst &= (uint8_t)~0x40u;
-	if (g_forge.grabbed_live_index == live_idx)
-		g_forge.grabbed_object_index = obj_idx;
-
-	if (obj_idx != NONE)
-	{
-		inst->spawned_once = 1;
-		inst->death_tick = -1;
-		forge_3d_move_instance_ext(
-			live_idx,
-			inst->x, inst->y, inst->z,
-			inst->yaw, inst->pitch, inst->roll,
-			is_held,
-			0);
-	}
 	return obj_idx;
 }
 
@@ -4943,7 +4901,7 @@ static void forge_drop_or_place_held_item(void)
 	forge_server_mark_dirty();
 }
 
-static real_point3d s_last_valid_spartan_pos = { 0.0f, 0.0f, 0.0f };
+static real_point3d s_last_valid_spartan_pos = { { 0.0f, 0.0f, 0.0f } };
 static int s_has_valid_spartan_pos = 0;
 
 /* Computes a guaranteed-safe Spartan feet position from the Monitor camera position:
@@ -5210,99 +5168,6 @@ extern void network_distributed_notify_forge_monitor_teleport(
 	real_point3d const *new_position,
 	boolean is_monitor);
 
-void forge_apply_host_player_monitor_state(
-	int player_abs_idx,
-	int is_monitor,
-	float x, float y, float z,
-	float yaw, float pitch)
-{
-	long p_idx;
-	int was_monitor;
-
-	if (player_abs_idx < 0 || player_abs_idx >= 128)
-		return;
-
-	was_monitor = g_forge.player_is_monitor[player_abs_idx];
-	g_forge.player_is_monitor[player_abs_idx] = (uint8_t)(is_monitor ? 1 : 0);
-	g_forge.player_has_monitor_pos[player_abs_idx] = (uint8_t)(is_monitor ? 1 : 0);
-	g_forge.player_monitor_pos[player_abs_idx][0] = x;
-	g_forge.player_monitor_pos[player_abs_idx][1] = y;
-	g_forge.player_monitor_pos[player_abs_idx][2] = z;
-	g_forge.player_monitor_yaw[player_abs_idx] = yaw;
-	g_forge.player_monitor_pitch[player_abs_idx] = pitch;
-
-	if (!is_monitor)
-	{
-		g_forge.player_has_render_pos[player_abs_idx] = 0;
-	}
-	else if (!g_forge.player_has_render_pos[player_abs_idx] || !was_monitor)
-	{
-		g_forge.player_has_render_pos[player_abs_idx] = 1;
-		g_forge.player_monitor_render_pos[player_abs_idx][0] = x;
-		g_forge.player_monitor_render_pos[player_abs_idx][1] = y;
-		g_forge.player_monitor_render_pos[player_abs_idx][2] = z;
-		g_forge.player_monitor_render_yaw[player_abs_idx] = yaw;
-		g_forge.player_monitor_render_pitch[player_abs_idx] = pitch;
-	}
-	else
-	{
-		float dx = x - g_forge.player_monitor_render_pos[player_abs_idx][0];
-		float dy = y - g_forge.player_monitor_render_pos[player_abs_idx][1];
-		float dz = z - g_forge.player_monitor_render_pos[player_abs_idx][2];
-		if (dx * dx + dy * dy + dz * dz > 36.0f)
-		{
-			g_forge.player_monitor_render_pos[player_abs_idx][0] = x;
-			g_forge.player_monitor_render_pos[player_abs_idx][1] = y;
-			g_forge.player_monitor_render_pos[player_abs_idx][2] = z;
-			g_forge.player_monitor_render_yaw[player_abs_idx] = yaw;
-			g_forge.player_monitor_render_pitch[player_abs_idx] = pitch;
-		}
-	}
-
-	if (!player_data)
-		return;
-
-	for (p_idx = data_next_index(player_data, NONE); p_idx != NONE; p_idx = data_next_index(player_data, p_idx))
-	{
-		if ((int)DATUM_INDEX_TO_ABSOLUTE_INDEX(p_idx) == player_abs_idx)
-		{
-			struct player_datum *pl = player_get(p_idx);
-			if (pl && pl->unit_index != NONE)
-			{
-				struct unit_datum *u_chk = (struct unit_datum *)object_try_and_get_and_verify_type(pl->unit_index, _object_mask_unit);
-				if (is_monitor && u_chk && (u_chk->object.parent_object_index != NONE || u_chk->unit.parent_seat_index != NONE))
-				{
-					/* A player seated inside a vehicle cannot switch into Monitor Mode */
-					g_forge.player_is_monitor[player_abs_idx] = 0;
-					g_forge.player_has_monitor_pos[player_abs_idx] = 0;
-					g_forge.player_has_render_pos[player_abs_idx] = 0;
-					forge_hide_spartan_linked_attachments_and_children(pl->unit_index, 0);
-					return;
-				}
-				forge_hide_spartan_linked_attachments_and_children(pl->unit_index, is_monitor ? 1 : 0);
-				if (game_connection() == _game_connection_network_server &&
-					player_abs_idx != forge_get_local_player_abs_index())
-				{
-					forge_sync_unit_to_monitor_pose(
-						pl->unit_index,
-						x, y, z,
-						yaw, pitch, 0.0f,
-						is_monitor ? 1 : 0,
-						1,
-						0.0f);
-					u_chk = (struct unit_datum *)object_try_and_get_and_verify_type(pl->unit_index, _object_mask_unit);
-					if (u_chk)
-					{
-						network_distributed_notify_forge_monitor_teleport(
-							p_idx, pl->unit_index, &u_chk->object.position, is_monitor ? TRUE : FALSE);
-					}
-				}
-			}
-			break;
-		}
-	}
-}
-
 static void forge_monitor_enforce_wall_clearance(real_point3d *pt, float keep_dist)
 {
 	static float const s_ProbeDirs[6][3] = {
@@ -5543,72 +5408,6 @@ static long find_matching_default_world_object(
 	return found_oidx;
 }
 
-int32_t forge_3d_adopt_default_object_at_slot(
-	int32_t forced_live_idx,
-	uint32_t group_tag,
-	char const *tag_path,
-	float orig_x,
-	float orig_y,
-	float orig_z)
-{
-	long found_oidx;
-	int32_t adopted_idx;
-
-	if (forced_live_idx < 0 || forced_live_idx >= FORGE_MAX_LIVE_INSTANCES)
-		return -1;
-
-	if (g_forge.live_instance_count == 0)
-		forge_init_map_scenario_entities();
-
-	if (forced_live_idx < g_forge.live_instance_count)
-	{
-		struct forge_live_instance const *cur = &g_forge.live_instances[forced_live_idx];
-		if (cur->is_default_scenario_object &&
-			(!cur->active || forge_valid_object_get(cur->object_index) != NULL))
-		{
-			float dx = cur->orig_x - orig_x;
-			float dy = cur->orig_y - orig_y;
-			float dz = cur->orig_z - orig_z;
-			if (dx * dx + dy * dy + dz * dz < 1.0f)
-				return forced_live_idx;
-		}
-	}
-
-	found_oidx = find_matching_default_world_object(group_tag, tag_path, orig_x, orig_y, orig_z, -1);
-	if (found_oidx == NONE)
-		return -1;
-
-	adopted_idx = adopt_default_scenario_object(found_oidx);
-	if (adopted_idx < 0)
-		return -1;
-
-	g_forge.live_instances[adopted_idx].orig_x = orig_x;
-	g_forge.live_instances[adopted_idx].orig_y = orig_y;
-	g_forge.live_instances[adopted_idx].orig_z = orig_z;
-	forge_ensure_default_object_edit_entry(&g_forge.live_instances[adopted_idx]);
-
-	if (adopted_idx != forced_live_idx)
-	{
-		if (forced_live_idx >= g_forge.live_instance_count)
-		{
-			memset(
-				&g_forge.live_instances[g_forge.live_instance_count],
-				0,
-				(size_t)(forced_live_idx - g_forge.live_instance_count + 1) * sizeof(struct forge_live_instance));
-			g_forge.live_instance_count = forced_live_idx + 1;
-		}
-		if (!g_forge.live_instances[forced_live_idx].active)
-		{
-			g_forge.live_instances[forced_live_idx] = g_forge.live_instances[adopted_idx];
-			memset(&g_forge.live_instances[adopted_idx], 0, sizeof(struct forge_live_instance));
-			g_forge.live_instances[adopted_idx].object_index = NONE;
-			g_forge.live_instances[adopted_idx].edit_entry_index = -1;
-			adopted_idx = forced_live_idx;
-		}
-	}
-	return adopted_idx;
-}
-
 static long s_last_game_tick = -1;
 static struct scenario *s_last_tick_scen = NULL;
 
@@ -5627,7 +5426,6 @@ static int forge_is_instance_held_by_weld_drag(int32_t live_idx)
 
 static void forge_enforce_runtime_object_properties(void)
 {
-	long cur_tick = game_time_get();
 	int i;
 
 	for (i = 0; i < g_forge.live_instance_count; i++)
@@ -8954,7 +8752,7 @@ int forge_3d_fill_live_observer_result(void *out_observer_result)
 	}
 	else
 	{
-		real_point3d mon_pt = { g_forge.cam_x, g_forge.cam_y, g_forge.cam_z };
+		real_point3d mon_pt = { { g_forge.cam_x, g_forge.cam_y, g_forge.cam_z } };
 		scenario_location_from_point(&loc, &mon_pt);
 		if (loc.leaf_index != NONE)
 			obs->location = loc;
@@ -9497,7 +9295,7 @@ void forge_3d_draw_hud(
 
 				if (!draw_ce_rounded_row_bar(1, in_x0, in_y0, in_x1, in_y1))
 				{
-					rectangle2d ib = { in_y0, in_x0, in_y1, in_x1 };
+					rectangle2d ib = { { in_y0, in_x0, in_y1, in_x1 } };
 					draw_quad(&ib, 0xE8040C1Cu);
 					draw_box_border(in_x0, in_y0, in_x1, in_y1, 1, 0xFF2896FFu);
 				}
@@ -9535,7 +9333,7 @@ void forge_3d_draw_hud(
 
 				if (!draw_ce_rounded_row_bar(1, in_x0, in_y0, in_x1, in_y1))
 				{
-					rectangle2d ib = { in_y0, in_x0, in_y1, in_x1 };
+					rectangle2d ib = { { in_y0, in_x0, in_y1, in_x1 } };
 					draw_quad(&ib, 0xE8040C1Cu);
 					draw_box_border(in_x0, in_y0, in_x1, in_y1, 1, 0xFF2896FFu);
 				}

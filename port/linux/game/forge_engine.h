@@ -19,7 +19,7 @@ extern "C" {
 
 #include "halo_port_limits.h"
 
-#define FORGE_VERSION_STRING "2.14.2"
+#define FORGE_VERSION_STRING "2.14.3"
 #define FORGE_NETWORK_VERSION 0x4635
 #define FORGE_GAME_KIND 0x46
 #ifndef HALO_PORT_NETWORK_VERSION_STOCK
@@ -30,7 +30,6 @@ extern "C" {
    so an upstream protocol bump never leaves Forge unable to join stock games. */
 
 extern int g_forge_session_enabled;
-long forge_get_network_version(void);
 
 /* Engine function (source/main/main.h) used by several Forge modules */
 char *main_get_map_name(void);
@@ -39,8 +38,6 @@ void *forge_host_fopen(char const *path, char const *mode);
 int forge_host_remove(char const *path);
 int forge_host_rename(char const *old_path, char const *new_path);
 void forge_server_mark_dirty(void);
-void forge_server_autosave_tick(void);
-int forge_server_save_map_if_dirty(int force_full_export);
 
 #ifndef _WIN32
 extern int strcasecmp(char const *a, char const *b);
@@ -372,20 +369,11 @@ int forge_is_unit_in_monitor_mode(long unit_index);
 int forge_get_local_player_abs_index(void);
 void forge_render_begin_monitor_visibility(void);
 void forge_render_end_monitor_visibility(void);
-void forge_apply_host_player_monitor_state(int player_abs_idx, int is_monitor, float x, float y, float z, float yaw, float pitch);
 int32_t forge_3d_adopt_or_find_object_instance(long object_index);
-int32_t forge_3d_adopt_default_object_at_slot(
-	int32_t forced_live_idx,
-	uint32_t group_tag,
-	char const *tag_path,
-	float orig_x,
-	float orig_y,
-	float orig_z);
 void forge_init_map_scenario_entities(void);
 void forge_3d_reset_session_tracking(void);
 void forge_sync_instance_extended_props_to_edit_state(int32_t live_idx);
 void forge_undo_clear(void);
-int forge_find_credits_tag_by_hash(uint32_t target_hash, uint32_t *out_group, char *out_path, size_t path_sz);
 
 /* ---------- Prototypes: forge_network.c */
 
@@ -420,7 +408,6 @@ short forge_key_state(int vk);
 
 /* ---------- Catalog Hashing & Instance Sync */
 uint32_t forge_compute_catalog_hash(uint32_t group_tag, char const *tag_path);
-long forge_create_engine_object_for_instance(int32_t live_idx, long def_idx, int is_held);
 void forge_network_register_host_object(int32_t live_idx, long object_index, long definition_index, uint32_t group_tag, char const *tag_path);
 
 #undef GetAsyncKeyState
