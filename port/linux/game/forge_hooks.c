@@ -1153,8 +1153,6 @@ static struct
 	int preserve_on_return;
 } s_inst_browser = { 0, 0, 0, 0 };
 
-static int s_preview_rev = 1;
-
 static void fw_text_set_wide(struct forge_widget_instance *tb, wchar_t const *wstr)
 {
 	int i;
@@ -1350,7 +1348,6 @@ static void update_forge_installed_tags_widget(struct forge_widget_instance *lis
 		s_inst_browser.cat = cat;
 		s_inst_browser.first = 0;
 		s_inst_browser.chosen = 0;
-		s_preview_rev++;
 		if (fw_focused_row(list) >= 1)
 			fw_focus_row(list, 1);
 	}
@@ -1582,7 +1579,6 @@ boolean pc_menu_event_function_invoke(
 			if (s_inst_browser.first > s_inst_browser.chosen)
 				s_inst_browser.first = s_inst_browser.chosen;
 			fw_focus_row(widget, (cnt > 0) ? (1 + s_inst_browser.chosen - s_inst_browser.first) : 0);
-			s_preview_rev++;
 			return TRUE;
 		}
 	}
@@ -1742,14 +1738,12 @@ boolean pc_menu_event_function_invoke(
 		if (w_name && strcmp(w_name, "forge_installed_tag_delete_btn") == 0)
 		{
 			forge_ui_installed_tag_delete(s_inst_browser.cat, s_inst_browser.chosen);
-			s_preview_rev++;
 			ui_play_audio_feedback_sound(2);
 			return TRUE;
 		}
 		if (w_name && strcmp(w_name, "forge_confirm_reset_stock_ok") == 0)
 		{
 			forge_reset_stock_tag_cache();
-			s_preview_rev++;
 			ui_play_audio_feedback_sound(2);
 			return TRUE;
 		}

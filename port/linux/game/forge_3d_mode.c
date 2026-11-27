@@ -1769,12 +1769,12 @@ static void draw_sized_bottom_pill_bar(
 		set_forge_hud_ui_scale(FORGE_IN_MATCH_HUD_SCALE, (float)(safe_x0 + safe_x1) * 0.5f, (float)y_bottom);
 		if (!draw_ce_rounded_row_bar(frame_idx, bx0, row1_y0, bx1, row1_y1))
 		{
-			rectangle2d r1 = { row1_y0, bx0, row1_y1, bx1 };
+			rectangle2d r1 = { { row1_y0, bx0, row1_y1, bx1 } };
 			draw_themed_panel(fallback_area, &r1, 0);
 		}
 		if (!draw_ce_rounded_row_bar(frame_idx, bx0, row2_y0, bx1, row2_y1))
 		{
-			rectangle2d r2 = { row2_y0, bx0, row2_y1, bx1 };
+			rectangle2d r2 = { { row2_y0, bx0, row2_y1, bx1 } };
 			draw_themed_panel(fallback_area, &r2, 0);
 		}
 		draw_ce_menu_str_box(0, fallback_font, bx0, (short)(row1_y0 + 2), bx1, row1_y1, 2 /* center */, line1, text_col);
@@ -1789,7 +1789,7 @@ static void draw_sized_bottom_pill_bar(
 		set_forge_hud_ui_scale(FORGE_IN_MATCH_HUD_SCALE, (float)(safe_x0 + safe_x1) * 0.5f, (float)y_bottom);
 		if (!draw_ce_rounded_row_bar(frame_idx, bx0, by0, bx1, by1))
 		{
-			rectangle2d bbar = { by0, bx0, by1, bx1 };
+			rectangle2d bbar = { { by0, bx0, by1, bx1 } };
 			draw_themed_panel(fallback_area, &bbar, 0);
 		}
 		draw_ce_menu_str_box(0, fallback_font, bx0, (short)(by0 + 2), bx1, by1, 2 /* center */, line1, text_col);
@@ -2638,48 +2638,6 @@ static long forge_create_configured_engine_object(
 	object_set_automatic_deactivation(obj_idx, FALSE);
 	object_activate(obj_idx);
 	forge_ensure_object_connected_to_bsp(obj_idx, x, y, z);
-	return obj_idx;
-}
-
-long forge_create_engine_object_for_instance(int32_t live_idx, long def_idx, int is_held)
-{
-	struct forge_live_instance *inst;
-	long obj_idx;
-
-	if (live_idx < 0 || live_idx >= g_forge.live_instance_count || def_idx == NONE)
-		return NONE;
-	inst = &g_forge.live_instances[live_idx];
-	if (!inst->active)
-		return NONE;
-
-	if (inst->object_index != NONE)
-	{
-		if (forge_valid_object_get(inst->object_index))
-			object_delete(inst->object_index);
-		inst->object_index = NONE;
-	}
-
-	obj_idx = forge_create_configured_engine_object(
-		def_idx,
-		inst->group_tag,
-		inst->x, inst->y, inst->z,
-		inst->yaw, inst->pitch, inst->roll);
-	inst->object_index = obj_idx;
-	inst->pad_inst &= (uint8_t)~0x40u;
-	if (g_forge.grabbed_live_index == live_idx)
-		g_forge.grabbed_object_index = obj_idx;
-
-	if (obj_idx != NONE)
-	{
-		inst->spawned_once = 1;
-		inst->death_tick = -1;
-		forge_3d_move_instance_ext(
-			live_idx,
-			inst->x, inst->y, inst->z,
-			inst->yaw, inst->pitch, inst->roll,
-			is_held,
-			0);
-	}
 	return obj_idx;
 }
 
@@ -4943,7 +4901,7 @@ static void forge_drop_or_place_held_item(void)
 	forge_server_mark_dirty();
 }
 
-static real_point3d s_last_valid_spartan_pos = { 0.0f, 0.0f, 0.0f };
+static real_point3d s_last_valid_spartan_pos = { { 0.0f, 0.0f, 0.0f } };
 static int s_has_valid_spartan_pos = 0;
 
 /* Computes a guaranteed-safe Spartan feet position from the Monitor camera position:
@@ -5627,7 +5585,6 @@ static int forge_is_instance_held_by_weld_drag(int32_t live_idx)
 
 static void forge_enforce_runtime_object_properties(void)
 {
-	long cur_tick = game_time_get();
 	int i;
 
 	for (i = 0; i < g_forge.live_instance_count; i++)
@@ -8954,7 +8911,7 @@ int forge_3d_fill_live_observer_result(void *out_observer_result)
 	}
 	else
 	{
-		real_point3d mon_pt = { g_forge.cam_x, g_forge.cam_y, g_forge.cam_z };
+		real_point3d mon_pt = { { g_forge.cam_x, g_forge.cam_y, g_forge.cam_z } };
 		scenario_location_from_point(&loc, &mon_pt);
 		if (loc.leaf_index != NONE)
 			obs->location = loc;
@@ -9497,7 +9454,7 @@ void forge_3d_draw_hud(
 
 				if (!draw_ce_rounded_row_bar(1, in_x0, in_y0, in_x1, in_y1))
 				{
-					rectangle2d ib = { in_y0, in_x0, in_y1, in_x1 };
+					rectangle2d ib = { { in_y0, in_x0, in_y1, in_x1 } };
 					draw_quad(&ib, 0xE8040C1Cu);
 					draw_box_border(in_x0, in_y0, in_x1, in_y1, 1, 0xFF2896FFu);
 				}
@@ -9535,7 +9492,7 @@ void forge_3d_draw_hud(
 
 				if (!draw_ce_rounded_row_bar(1, in_x0, in_y0, in_x1, in_y1))
 				{
-					rectangle2d ib = { in_y0, in_x0, in_y1, in_x1 };
+					rectangle2d ib = { { in_y0, in_x0, in_y1, in_x1 } };
 					draw_quad(&ib, 0xE8040C1Cu);
 					draw_box_border(in_x0, in_y0, in_x1, in_y1, 1, 0xFF2896FFu);
 				}
