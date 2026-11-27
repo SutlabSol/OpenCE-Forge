@@ -54,5 +54,14 @@ int main(int argc, char **argv)
 		CHECK(h1 != 0u && h1 == h2, "hash should normalize case and path separators");
 		CHECK(h1 != h3, "hash should incorporate group_tag");
 	}
+	else CASE("input_suppress")
+	{
+		CHECK(forge_should_suppress_editor_input(0, 0, 0) == 0, "normal play should allow monitor input");
+		CHECK(forge_should_suppress_editor_input(1, 0, 0) == 1, "pause menu must suppress monitor input");
+		CHECK(forge_should_suppress_editor_input(0, 1, 0) == 1, "text chat typing must suppress monitor input");
+		CHECK(forge_should_suppress_editor_input(0, 0, 1) == 1, "dev console must suppress monitor input");
+		CHECK(forge_should_suppress_editor_input(0, 1, 1) == 1, "chat + console must suppress monitor input");
+		CHECK(forge_should_suppress_editor_input(1, 1, 1) == 1, "all active must suppress monitor input");
+	}
 	return 0;
 }
