@@ -3573,6 +3573,88 @@ wchar_t const *forge_game_modes_variant_kind_name(struct game_variant const *var
 	return game_modes_variant_kind_name(variant, options);
 }
 
+static int forge_listing_is_forge(struct p2p_listing const *game)
+{
+	if (!game)
+		return 0;
+	if (game->network_version == FORGE_NETWORK_VERSION)
+		return 1;
+	if ((game->kind & ~0x80) == FORGE_GAME_KIND)
+		return 1;
+	if (game->gametype[0] && _stricmp(game->gametype, "Forge") == 0)
+		return 1;
+	return 0;
+}
+
+static int forge_filter_lobby_listings(struct p2p_listing *games, int count, int forge_mode_enabled)
+{
+	int i;
+	int out = 0;
+
+	if (!games || count <= 0)
+		return 0;
+
+	for (i = 0; i < count; i++)
+	{
+		int is_forge = forge_listing_is_forge(&games[i]);
+		if (forge_mode_enabled)
+		{
+			if (!is_forge)
+				continue;
+			games[i].kind = FORGE_GAME_KIND;
+			games[i].network_version = FORGE_NETWORK_VERSION;
+		}
+		else
+		{
+			if (is_forge)
+				continue;
+		}
+		if (out != i)
+			games[out] = games[i];
+		out++;
+	}
+	return out;
+}
+
+int forge_p2p_lobby_games(struct p2p_listing *games, int maximum_count)
+{
+	int count = p2p_lobby_games(games, maximum_count);
+	return forge_filter_lobby_listings(games, count, g_forge_session_enabled ? 1 : 0);
+}
+
+int forge_lan_advertised_game_visible(void *client_ptr, void const *game_ptr)
+{
+	struct network_game_client *client = (struct network_game_client *)client_ptr;
+	struct network_advertised_game const *game = (struct network_advertised_game const *)game_ptr;
+	struct network_advertised_game const *base;
+	struct network_advertised_game_summary summary;
+	long index;
+	int is_forge = 0;
+
+	if (!client || !game)
+		return g_forge_session_enabled ? 0 : 1;
+
+	base = network_game_client_get_available_games(client);
+	if (!base)
+		return g_forge_session_enabled ? 0 : 1;
+
+	index = (long)(((char const *)game - (char const *)base) / 0xE4);
+	if (index < 0 || index >= 9)
+		return g_forge_session_enabled ? 0 : 1;
+
+	memset(&summary, 0, sizeof(summary));
+	if (network_game_client_port_advertised_game_summary(index, &summary))
+	{
+		if (summary.version == FORGE_NETWORK_VERSION ||
+			(summary.kind & ~0x80) == FORGE_GAME_KIND ||
+			_wcsicmp(summary.name, L"Forge") == 0)
+		{
+			is_forge = 1;
+		}
+	}
+	return g_forge_session_enabled ? is_forge : !is_forge;
+}
+
 /* Local-only Phase 2 no-op stubs (networked MP Forge sync arrives in Phase 3). */
 void forge_network_reset_session(void) {}
 void forge_network_sync_tick(void) {}

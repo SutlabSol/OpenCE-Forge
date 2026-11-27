@@ -2077,12 +2077,14 @@ static void forge_delete_files_matching(char const *dir_path, char const *patter
 
 static void close_runtime_xbox_donor(void);
 static void forge_ensure_local_tag_cache_built(void);
+static int s_local_tag_cache_checked = 0;
 
 int forge_reset_stock_tag_cache(void)
 {
 	char z_path[512];
 
 	close_runtime_xbox_donor();
+	s_local_tag_cache_checked = 0;
 	remove("OpenCE Forge/cached_tags/xbox_catalog.txt");
 	remove("OpenCE Forge/cached_tags/catalog.txt");
 	remove("OpenCE Forge/credits.md");
@@ -2104,39 +2106,13 @@ int forge_reset_stock_tag_cache(void)
 
 static void forge_ensure_local_tag_cache_built(void)
 {
+	if (s_local_tag_cache_checked)
+		return;
+	s_local_tag_cache_checked = 1;
+
 	/* Clean up any legacy duplicate Xbox .map cache folder from older versions */
 	forge_delete_files_matching("OpenCE Forge/cached_tags/xbox_cache", "*.map");
 	RemoveDirectoryA("OpenCE Forge/cached_tags/xbox_cache");
-
-	{
-		FILE *f = fopen("OpenCE Forge/cached_tags/xbox_catalog.txt", "r");
-		if (f)
-		{
-			char line[512];
-			int has_base_tags = 0;
-			int has_lights_and_door = 0;
-			int has_wraith = 0;
-			while (fgets(line, sizeof(line), f))
-			{
-				if (strstr(line, "|0|") != NULL)
-					has_base_tags = 1;
-				if (strstr(line, "beam emitter red") != NULL)
-					has_lights_and_door = 1;
-				if (strstr(line, "vehicles\\wraith\\wraith") != NULL)
-					has_wraith = 1;
-			}
-			fclose(f);
-			if (has_base_tags && has_lights_and_door && has_wraith)
-			{
-				FILE *cr = fopen("OpenCE Forge/credits.md", "r");
-				if (cr)
-				{
-					fclose(cr);
-					return;
-				}
-			}
-		}
-	}
 
 	/* Active-map [MAP] tags only in Phase 2 (no Xbox maps/ ripping to cached_tags). */
 	CreateDirectoryA("OpenCE Forge", NULL);
@@ -2146,7 +2122,8 @@ void forge_runtime_init(void)
 {
 	if (g_forge.initialized)
 	{
-		forge_ensure_local_tag_cache_built();
+		if (g_forge_session_enabled && !s_local_tag_cache_checked)
+			forge_ensure_local_tag_cache_built();
 		return;
 	}
 	memset(&g_forge, 0, sizeof(g_forge));
@@ -2171,7 +2148,8 @@ void forge_runtime_init(void)
 	RemoveDirectoryA("OpenCE Forge/cached_tags/xbox_cache");
 	RemoveDirectoryA("OpenCE Forge/custom_tags");
 	RemoveDirectoryA("custom_tags");
-	forge_ensure_local_tag_cache_built();
+	if (g_forge_session_enabled)
+		forge_ensure_local_tag_cache_built();
 	forge_runtime_reload_catalogs();
 }
 
