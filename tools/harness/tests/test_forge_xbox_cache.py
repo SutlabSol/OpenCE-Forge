@@ -24,13 +24,14 @@ def generated(fault=None):
         function(rt, "is_excluded_weapon_or_equipment_tag"),
         function(rt, "compute_catalog_entry_allowed"),
         function(rt, "forge_validate_safe_object_tag"),
+        function(rt, "forge_xbox_catalog_text_is_valid"),
     ])
     if fault:
         code = mutated(code, *fault)
     return (("defs.inc", defs), ("under_test.inc", code))
 
 
-@pytest.mark.parametrize("case", ["catalog_filters", "safe_tags", "effect_refs"])
+@pytest.mark.parametrize("case", ["catalog_filters", "safe_tags", "effect_refs", "catalog_validity"])
 def test_case(case):
     status, output = run(build("forge_xbox_cache", generated()), case)
     assert status == 0, output
@@ -41,6 +42,7 @@ def test_case(case):
     (("if (entry->source_cache_id == 3)", "if (0)"), "catalog_filters"),
     (("if (odef->type != expected_type)\n\t\treturn 0;", "if (odef->type != expected_type)\n\t\t(void)expected_type;"), "safe_tags"),
     (("pt_grp == 'actr' || pt_grp == 'actv' || pt_grp == 'bipd'", "0"), "effect_refs"),
+    (("p2[1] == '0'", "1"), "catalog_validity"),
 ])
 def test_negative_control(fault, case):
     status, output = run(build("forge_xbox_cache", generated(fault)), case)

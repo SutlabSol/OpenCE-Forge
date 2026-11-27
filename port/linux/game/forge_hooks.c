@@ -3585,31 +3585,53 @@ wchar_t const *forge_game_modes_variant_kind_name(struct game_variant const *var
 	return game_modes_variant_kind_name(variant, options);
 }
 
+static int forge_listing_is_forge(struct p2p_listing const *game)
+{
+	if (!game)
+		return 0;
+	if (game->network_version == FORGE_NETWORK_VERSION)
+		return 1;
+	if ((game->kind & ~0x80) == FORGE_GAME_KIND)
+		return 1;
+	if (game->gametype[0] && _stricmp(game->gametype, "Forge") == 0)
+		return 1;
+	return 0;
+}
+
+static int forge_filter_lobby_listings(struct p2p_listing *games, int count, int forge_mode_enabled)
+{
+	int i;
+	int out = 0;
+
+	if (!games || count <= 0)
+		return 0;
+
+	for (i = 0; i < count; i++)
+	{
+		int is_forge = forge_listing_is_forge(&games[i]);
+		if (forge_mode_enabled)
+		{
+			if (!is_forge)
+				continue;
+			games[i].kind = FORGE_GAME_KIND;
+			games[i].network_version = FORGE_NETWORK_VERSION;
+		}
+		else
+		{
+			if (is_forge)
+				continue;
+		}
+		if (out != i)
+			games[out] = games[i];
+		out++;
+	}
+	return out;
+}
+
 int forge_p2p_lobby_games(struct p2p_listing *games, int maximum_count)
 {
 	int count = p2p_lobby_games(games, maximum_count);
-	int i;
-
-	if (games)
-	{
-		unsigned short local_net_ver = (unsigned short)forge_get_network_version();
-		for (i = 0; i < count; i++)
-		{
-			if (games[i].network_version == FORGE_NETWORK_VERSION ||
-				(games[i].kind & ~0x80) == FORGE_GAME_KIND ||
-				(games[i].gametype[0] && _stricmp(games[i].gametype, "Forge") == 0))
-			{
-				games[i].kind = FORGE_GAME_KIND;
-			}
-			if (games[i].network_version == FORGE_NETWORK_VERSION ||
-				(games[i].network_version >= HALO_PORT_NETWORK_VERSION_OLDEST &&
-				 games[i].network_version <= HALO_PORT_NETWORK_VERSION_STOCK))
-			{
-				games[i].network_version = local_net_ver;
-			}
-		}
-	}
-	return count;
+	return forge_filter_lobby_listings(games, count, g_forge_session_enabled ? 1 : 0);
 }
 
 extern byte orig_network_game_client_advertised_game_kind(
@@ -3676,6 +3698,15 @@ static int forge_advertised_game_is_forge(
 		return 1;
 	}
 	return 0;
+}
+
+int forge_lan_advertised_game_visible(void *client, void const *game)
+{
+	int is_forge = forge_advertised_game_is_forge(
+		(struct network_game_client *)client,
+		(struct network_advertised_game const *)game,
+		NULL);
+	return g_forge_session_enabled ? is_forge : !is_forge;
 }
 
 byte network_game_client_advertised_game_kind(

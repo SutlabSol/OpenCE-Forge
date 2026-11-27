@@ -206,5 +206,14 @@ int main(int argc, char **argv)
 		pt.reference.group_tag = 'actv';
 		CHECK(!forge_validate_safe_object_tag(0), "creation_effect referencing AI actv rejected");
 	}
+	else CASE("catalog_validity")
+	{
+		CHECK(forge_xbox_catalog_text_is_valid("weap|0|0|weapons\\pistol\\pistol\n"), "base catalog line valid without lights or wraith");
+		CHECK(forge_xbox_catalog_text_is_valid("vehi|2|0|vehicles\\warthog\\mp_warthog\n"), "vehicle catalog line valid");
+		CHECK(!forge_xbox_catalog_text_is_valid("weap|0|3|weapons\\pistol\\pistol\n"), "map-local |3| entry does not validate Xbox cache");
+		CHECK(!forge_xbox_catalog_text_is_valid("# comment only\n"), "comment-only catalog invalid");
+		CHECK(!forge_xbox_catalog_text_is_valid(""), "empty string invalid");
+		CHECK(!forge_xbox_catalog_text_is_valid(NULL), "NULL invalid");
+	}
 	return 0;
 }
